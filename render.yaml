@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: chicago-bike-advocacy-map
+    runtime: docker
+    branch: master
+    rootDir: chicago-bike-advocacy-map
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /health
+    disk:
+      name: bikemap-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: BIKEMAP_DB_PATH
+        value: /var/data/bikemap.db
+      - key: CACHE_DB_PATH
+        value: /var/data/cache.db
+      - key: NOMINATIM_USER_AGENT
+        value: chicago-bike-advocacy-map/1.0
+      - key: MIN_STREETS
+        value: "10000"
+      - key: APP_BOOTSTRAP
+        value: "1"
+      - key: PORT
+        value: "8000"

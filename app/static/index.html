@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1024">
+  <title>Chicago Bike Advocacy Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/lz-string@1.5.0/libs/lz-string.min.js"></script>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="ui-overlays">
+    <button id="basemap-toggle" type="button">Satellite</button>
+    <div id="tier-selector">
+      <button data-tier="kid" type="button">Safe for kid <span class="lts-allowance">(LTS 1)</span></button>
+      <button data-tier="parent" type="button">Safe for parent <span class="lts-allowance">(LTS 1-2)</span></button>
+      <button data-tier="any" type="button" class="active">Not safe <span class="lts-allowance">(LTS 1-3)</span></button>
+    </div>
+    <form id="home-form">
+      <input id="home-input" type="text" placeholder="Enter a location (Chicago)" autocomplete="off">
+      <button type="submit">Set location</button>
+      <div id="home-error" role="alert"></div>
+    </form>
+    <aside id="fact-panel" aria-label="Destination detail"></aside>
+    <div id="approx-badge" hidden>
+      Approximate home location — routes are illustrative.
+    </div>
+    <div id="permalink-modal" hidden role="dialog" aria-modal="true" aria-labelledby="pm-title">
+      <div class="pm-backdrop"></div>
+      <div class="pm-card">
+        <h2 id="pm-title">Copy permalink</h2>
+        <p class="pm-body">
+          This link encodes your home address. Share it with people you trust —
+          your alderman, your block club, your neighbors. <strong>Don't post it
+          publicly</strong> (Twitter, Reddit, etc.) unless you want everyone to
+          know where you live.
+        </p>
+        <div class="pm-actions">
+          <button class="pm-btn pm-btn-primary" data-mode="precise">Copy precise link</button>
+          <button class="pm-btn pm-btn-secondary" data-mode="approximate">Copy approximate link</button>
+        </div>
+        <p class="pm-fine-print">
+          The approximate link rounds your home to the nearest ~110 m
+          (block level), so the routes shown are illustrative only.
+        </p>
+        <button class="pm-close" aria-label="Close">×</button>
+        <div class="pm-toast" hidden></div>
+      </div>
+    </div>
+    <div id="gap-loading" hidden>
+      <span class="spinner"></span>
+      <span class="gap-loading-text">Computing gap analysis…</span>
+    </div>
+    <aside id="dest-sidebar" hidden>
+      <h2>Where do you go?</h2>
+      <ul id="dest-categories">
+        <li><label><input type="checkbox" data-category="school"><span class="cat-icon">🏫</span> School</label></li>
+        <li><label><input type="checkbox" data-category="park"><span class="cat-icon">🌳</span> Park</label></li>
+        <li><label><input type="checkbox" data-category="grocery"><span class="cat-icon">🛒</span> Grocery</label></li>
+        <li><label><input type="checkbox" data-category="hospital"><span class="cat-icon">🏥</span> Hospital</label></li>
+        <li><label><input type="checkbox" data-category="alderman"><span class="cat-icon">🏛️</span> Alderman office</label></li>
+        <li><label><input type="checkbox" data-category="library"><span class="cat-icon">📚</span> Library</label></li>
+        <li><label><input type="checkbox" data-category="transit"><span class="cat-icon">🚆</span> CTA L stop</label></li>
+      </ul>
+      <p class="caveat">We picked the nearest by straight-line distance. If that's not the place you actually go, add it as a custom destination below.</p>
+      <form id="custom-form">
+        <input id="custom-input" type="text" placeholder="Add a custom destination" autocomplete="off">
+        <button type="submit">Add</button>
+      </form>
+      <div id="custom-error" role="alert"></div>
+    </aside>
+    <a id="explore-link" href="/explore">Explore LTS data →</a>
+  </div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

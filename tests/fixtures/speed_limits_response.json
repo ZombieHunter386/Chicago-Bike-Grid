@@ -1,0 +1,20 @@
+[
+  {
+    "objectid": "1",
+    "street_nam": "WESTERN AVE",
+    "speed_limit": "30",
+    "the_geom": {
+      "type": "MultiLineString",
+      "coordinates": [[[-87.689, 41.975], [-87.689, 41.985]]]
+    }
+  },
+  {
+    "objectid": "2",
+    "street_nam": "FOSTER AVE",
+    "speed_limit": "30",
+    "the_geom": {
+      "type": "MultiLineString",
+      "coordinates": [[[-87.689, 41.975], [-87.679, 41.975]]]
+    }
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "name_": "Lincoln Park",
+    "hours": "Mon-Thu 10-8, Fri-Sat 9-5, Sun 1-5",
+    "address": "1150 W FULLERTON AVE",
+    "city": "Chicago",
+    "state": "IL",
+    "zip": "60614",
+    "location": {
+      "type": "Point",
+      "coordinates": [-87.659, 41.925]
+    }
+  }
+]

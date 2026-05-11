@@ -1,0 +1,24 @@
+[
+  {
+    "objectid": "1",
+    "facility_t": "PROTECTED BIKE LANE",
+    "street": "MILWAUKEE AVE",
+    "f_st": "DIVISION ST",
+    "t_st": "ASHLAND AVE",
+    "the_geom": {
+      "type": "MultiLineString",
+      "coordinates": [[[-87.665, 41.903], [-87.667, 41.910]]]
+    }
+  },
+  {
+    "objectid": "2",
+    "facility_t": "BIKE LANE",
+    "street": "ELSTON AVE",
+    "f_st": "FULLERTON AVE",
+    "t_st": "DIVERSEY AVE",
+    "the_geom": {
+      "type": "MultiLineString",
+      "coordinates": [[[-87.690, 41.925], [-87.695, 41.932]]]
+    }
+  }
+]

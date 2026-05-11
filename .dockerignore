@@ -1,0 +1,54 @@
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Caches & venvs
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# VCS / CI metadata that doesn't belong in the image
+.github/
+.gitignore
+.git/
+
+# Docs — not needed at runtime
+docs/
+README.md
+*.md
+
+# Spike scripts (convention: leading underscore)
+_*
+
+# Logs
+*.log
+
+# Data: bikemap.db is mounted at runtime; cache files are throwaway.
+# Don't ship the 67 MB DB or 200+ MB scratch dirs in the image.
+data/
+
+# Brokenspoke / scratch outputs
+**/brokenspoke_results/
+
+# This file itself
+.dockerignore
+
+# Existing docker-compose for the Brokenspoke side stays out of the runtime image
+docker/
+
+# Nested duplicate dir name (artifact in worktree root)
+chicago-bike-advocacy-map/

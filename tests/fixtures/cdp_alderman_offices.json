@@ -1,0 +1,28 @@
+[
+  {
+    "ward": "1",
+    "alderman": "Daniel La Spata",
+    "address": "2740 W NORTH AVE",
+    "city": "Chicago",
+    "state": "IL",
+    "zip": "60647",
+    "phone": "(773) 278-0101",
+    "location": {
+      "type": "Point",
+      "coordinates": [-87.694, 41.910]
+    }
+  },
+  {
+    "ward": "47",
+    "alderman": "Matt Martin",
+    "address": "4243 N LINCOLN AVE",
+    "city": "Chicago",
+    "state": "IL",
+    "zip": "60618",
+    "phone": "(773) 868-4747",
+    "location": {
+      "type": "Point",
+      "coordinates": [-87.683, 41.959]
+    }
+  }
+]

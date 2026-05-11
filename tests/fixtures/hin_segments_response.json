@@ -1,0 +1,36 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "globalIdFieldName": "GlobalID",
+  "geometryType": "esriGeometryPolyline",
+  "spatialReference": {"wkid": 4326},
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "STNAME": "WESTERN AVE",
+        "FROM_": "FOSTER AVE",
+        "TO_": "LAWRENCE AVE",
+        "MODE_BIKE": 1,
+        "MODE_PED": 1,
+        "SEVERITY_RANK": 4
+      },
+      "geometry": {
+        "paths": [[[-87.689, 41.975], [-87.689, 41.968]]]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 2,
+        "STNAME": "FOSTER AVE",
+        "FROM_": "WESTERN AVE",
+        "TO_": "DAMEN AVE",
+        "MODE_BIKE": 0,
+        "MODE_PED": 1,
+        "SEVERITY_RANK": 3
+      },
+      "geometry": {
+        "paths": [[[-87.689, 41.975], [-87.679, 41.975]]]
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "globalIdFieldName": "GlobalID",
+  "geometryType": "esriGeometryPoint",
+  "spatialReference": {"wkid": 4326},
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 1,
+        "INTERSECTION_NAME": "Western Ave & Foster Ave",
+        "MODE_BIKE": 1,
+        "MODE_PED": 1,
+        "SEVERITY_RANK": 5
+      },
+      "geometry": {"x": -87.689, "y": 41.975}
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+# prep/config/routing_weights.yaml
+# CANONICAL routing weights — single source of truth.
+# Defined in spec §0.1; do not change without updating the spec.
+#
+# Penalty principle: tier controls which LTS levels are allowed; penalty is
+# intrinsic to the LTS level. LTS 1 = 1.0×, LTS 2 = 1.2×, LTS 3 = 1.5×.
+# PFB City Ratings 2025 publishes 1-3 (collapsing original Mineta levels 3+4
+# into a single 'high stress' tier); we use that scale directly.
+# Forbidden = 1e9 (numerical "infinity" stable for graph algorithms).
+
+inf: 1.0e+9  # implementation of "forbidden" / mathematical infinity
+
+tiers:
+  safe_for_kid:
+    lts_allowed: [1]
+    main:     [1.0, 1.0e+9, 1.0e+9]
+    fallback: [1.0, 5.0,   20.0]
+
+  safe_for_parent:
+    lts_allowed: [1, 2]
+    main:     [1.0, 1.2, 1.0e+9]
+    fallback: [1.0, 1.2, 10.0]
+
+  not_safe:
+    lts_allowed: [1, 2, 3]
+    main:     [1.0, 1.2, 1.5]
+    fallback: [1.0, 1.2, 1.5]

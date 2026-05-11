@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.venv/
+venv/
+.DS_Store
+data/cache/
+data/brokenspoke_results/
+data/bikemap.db
+data/bikemap.db-journal
+data/cache.db
+data/lts-network.geojson.gz
+prep_report.md
+hin_match_report.md
+lts_diff.md
+# Transient frontend dev deps. The state codec test uses `npm install
+# --no-save lz-string` to grab the same library the browser loads via CDN.
+node_modules/

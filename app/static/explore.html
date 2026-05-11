@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1024">
+  <title>Chicago LTS Data Explorer</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+</head>
+<body class="explore-page">
+  <div id="map"></div>
+  <div id="ui-overlays">
+    <button id="basemap-toggle" type="button" disabled>Loading data…</button>
+    <a id="back-to-advocacy" href="/">← Back to advocacy view</a>
+    <div id="legend" hidden>
+      <div class="legend-row"><span class="legend-swatch swatch-lts-1"></span> LTS 1 — Safe for kid</div>
+      <div class="legend-row"><span class="legend-swatch swatch-lts-2"></span> LTS 2 — Safe for parent</div>
+      <div class="legend-row"><span class="legend-swatch swatch-lts-3"></span> LTS 3 — Not safe</div>
+      <div class="legend-row"><span class="legend-swatch swatch-hin"></span> High-Injury Network</div>
+    </div>
+    <label id="hin-toggle" hidden>
+      <input type="checkbox" id="hin-checkbox"> Show High-Injury Network overlay
+    </label>
+    <div id="explore-error" hidden role="alert">
+      <p class="ee-text">Couldn't load the LTS network.</p>
+      <button class="ee-retry" type="button">Retry</button>
+    </div>
+  </div>
+  <script type="module" src="/static/explore.js"></script>
+</body>
+</html>

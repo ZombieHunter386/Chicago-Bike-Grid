@@ -1,0 +1,35 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": 12345,
+        "name": "W Foster Ave",
+        "ft_lts": 4,
+        "tf_lts": 4,
+        "highway": "primary",
+        "speed": 30
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-87.689, 41.975], [-87.679, 41.975]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": 67890,
+        "name": "N Hoyne Ave",
+        "ft_lts": 1,
+        "tf_lts": 1,
+        "highway": "residential",
+        "speed": 25
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-87.679, 41.975], [-87.679, 41.985]]
+      }
+    }
+  ]
+}

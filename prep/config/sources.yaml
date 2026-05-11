@@ -1,0 +1,60 @@
+# prep/config/sources.yaml
+# Source URLs and metadata for the prep pipeline. Update here, not in code.
+#
+# Dataset IDs verified 2026-05-05 against the live Chicago Data Portal.
+# See docs/dataset-ids.md for the verification record + rationale on speed_limits omission.
+
+sources:
+  hin:
+    name: "Cook County HIN (2025 SAP)"
+    type: "arcgis_feature_service"
+    # CMAP Cook County Safety Action Plan Traffic Safety Analysis — verified 2026-05-05.
+    # Source AGOL item: https://www.arcgis.com/home/item.html?id=1ee2e1bd1ddd451bb6061adbeed4c938
+    # Service hosts 9 layers; we consume layer 6 (HIN Segment, Polyline) and layer 5
+    # (HIN Intersection, Point). Counts as of 2026-05-05: 1,442 segments / 1,359 intersections.
+    # All features are HIN-flagged via HIN_Filter ∈ {"Comprehensive & Contextual",
+    # "Comprehensive Only", "Contextual Only"}; intersections also have HIN_Intx_CPM_Rank.
+    # NB: native CRS is WKID 102671 (NAD83 / Illinois East, US ft); fetcher must request
+    # `outSR=4326` to align with our storage CRS.
+    segments_url: "https://services5.arcgis.com/LcMXE3TFhi1BSaCY/arcgis/rest/services/Cook_County_SAP_Traffic_Safety_Analysis/FeatureServer/6"
+    intersections_url: "https://services5.arcgis.com/LcMXE3TFhi1BSaCY/arcgis/rest/services/Cook_County_SAP_Traffic_Safety_Analysis/FeatureServer/5"
+    refresh_cadence: "monthly"
+
+  cdot_bike_facilities:
+    name: "CDOT Bike Routes (sanity check only)"
+    type: "socrata"
+    domain: "data.cityofchicago.org"
+    dataset_id: "hvv9-38ut"  # verified — 'Bike Routes', 11 cols including the_geom + STREET + ONEWAY_DIR
+    refresh_cadence: "monthly"
+
+  cdp_alderman_offices:
+    name: "Chicago Aldermanic Ward Offices"
+    type: "socrata"
+    domain: "data.cityofchicago.org"
+    dataset_id: "htai-wnw4"  # verified — 'Ward Offices'
+    refresh_cadence: "monthly"
+
+  cdp_library_branches:
+    name: "Chicago Public Library Branches"
+    type: "socrata"
+    domain: "data.cityofchicago.org"
+    dataset_id: "x8fc-8rcq"  # verified — 'Libraries - Locations, Contact Information, and Usual Hours of Operation'
+    refresh_cadence: "monthly"
+
+brokenspoke:
+  image: "ghcr.io/peopleforbikes/brokenspoke-analyzer:3.1.1"
+  city_country: "united states"
+  city_name: "chicago"
+  city_state: "illinois"
+  city_fips: "1714000"
+  database_url: "postgresql://postgres:postgres@postgres:5432/postgres"
+  network_name: "bikemap-brokenspoke_default"
+  compose_file: "docker/compose.brokenspoke.yml"
+
+target:
+  name: "Chicago"
+  bbox:
+    min_lat: 41.6440
+    max_lat: 42.0230
+    min_lng: -87.9402
+    max_lng: -87.5240

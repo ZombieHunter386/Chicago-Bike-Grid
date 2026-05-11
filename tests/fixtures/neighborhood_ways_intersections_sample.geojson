@@ -1,0 +1,31 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": 999001,
+        "lts_approach": 4,
+        "signalized": true,
+        "lanes_crossed": 6
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-87.689, 41.975]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_id": 999002,
+        "lts_approach": 2,
+        "signalized": false,
+        "lanes_crossed": 2
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-87.679, 41.975]
+      }
+    }
+  ]
+}
