@@ -54,24 +54,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Install runtime + bench dependencies into /install so the runtime stage
-# can copy the tree wholesale. Pinning to the same versions used in
-# .venv (see pyproject.toml + pip list) — the bench needs python-igraph
-# and psutil which aren't in pyproject yet (psutil is a test-only dep).
-RUN pip install --target=/install \
-        "flask>=3.0,<4" \
-        "flask-limiter>=3.5" \
-        "gunicorn>=21.2,<27" \
-        "scipy>=1.11" \
-        "numpy>=2.0" \
-        "shapely>=2.0,<3" \
-        "pyproj>=3.7,<4" \
-        "python-igraph>=0.11,<1" \
-        "psutil>=5.9" \
-        "pytest>=8.0" \
-        "python-frontmatter>=1.1" \
-        "pyyaml>=6.0" \
-        "requests>=2.32,<3"
+# Install dependencies into /install so the runtime stage can copy the
+# tree wholesale. Direct pins live in requirements.txt (single source of
+# truth — same file `make test` reads). Transitives resolve via pip.
+COPY requirements.txt /build/requirements.txt
+RUN pip install --target=/install -r /build/requirements.txt
 
 # ---------- Stage 2: runtime ----------
 FROM python:3.11-slim AS runtime
