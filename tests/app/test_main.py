@@ -40,11 +40,68 @@ def test_health_endpoint_returns_200_when_loaded(
     assert data["status"] == "ok"
 
 
-def test_create_app_raises_when_bikemap_missing(tmp_path: Path) -> None:
+def test_create_app_raises_when_bikemap_missing(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Without UPLOAD_TOKEN, a missing bikemap.db is a misconfiguration
+    and we fail loudly. (With UPLOAD_TOKEN, bootstrap mode kicks in —
+    covered by test_create_app_returns_admin_only_when_bikemap_missing.)"""
     import pytest
 
     from app.main import create_app
 
+    monkeypatch.delenv("UPLOAD_TOKEN", raising=False)
+    with pytest.raises(FileNotFoundError):
+        create_app(
+            bikemap_db=tmp_path / "missing.db",
+            cache_db=tmp_path / "cache.db",
+            nominatim_user_agent="test/1.0",
+            min_streets=1,
+        )
+
+
+def test_create_app_returns_admin_only_when_bikemap_missing_and_token_set(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """First-boot bootstrap branch: empty disk + UPLOAD_TOKEN → stub app
+    exposing only /admin/upload-bikemap-db and a 200 /health."""
+    from app.main import create_app
+
+    monkeypatch.setenv("UPLOAD_TOKEN", "test-token")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    app = create_app(
+        bikemap_db=data_dir / "bikemap.db",
+        cache_db=tmp_path / "cache.db",
+        nominatim_user_agent="test/1.0",
+        min_streets=1,
+    )
+    client = app.test_client()
+
+    # /health must return 200 (else Render won't route traffic).
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "awaiting_bootstrap"
+
+    # /admin/upload-bikemap-db is wired (401 because no auth header).
+    resp = client.post("/admin/upload-bikemap-db")
+    assert resp.status_code == 401
+
+    # Routing endpoints are NOT registered in this mode.
+    resp = client.post("/routes", json={})
+    assert resp.status_code == 404
+
+
+def test_admin_only_mode_skipped_when_token_unset(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Empty token (env-var set but empty after .strip()) must NOT trigger
+    bootstrap mode — same as token-unset, fail loudly."""
+    import pytest
+
+    from app.main import create_app
+
+    monkeypatch.setenv("UPLOAD_TOKEN", "   ")
     with pytest.raises(FileNotFoundError):
         create_app(
             bikemap_db=tmp_path / "missing.db",

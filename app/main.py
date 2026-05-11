@@ -72,6 +72,18 @@ def create_app(
     nominatim_user_agent: str,
     min_streets: int = 10000,
 ) -> Flask:
+    upload_token = os.environ.get("UPLOAD_TOKEN", "").strip()
+
+    # First-boot bootstrap. When the persistent disk is empty and an
+    # UPLOAD_TOKEN is configured, expose only /admin/upload-bikemap-db
+    # + a 200-returning /health so Render routes traffic and `make
+    # upload-db` can populate /var/data. On the next redeploy the file
+    # exists and the normal-mode branch below boots the full app.
+    if not bikemap_db.exists() and upload_token:
+        return _make_admin_only_app(
+            data_dir=bikemap_db.parent, upload_token=upload_token,
+        )
+
     _validate_bikemap(bikemap_db, min_streets)
 
     init_cache_db(cache_db, fingerprint=bikemap_fingerprint(bikemap_db))
@@ -130,6 +142,43 @@ def create_app(
     @limiter.exempt
     def explore():  # type: ignore[no-untyped-def]
         return send_from_directory(app.static_folder, "explore.html")
+
+    return app
+
+
+def _make_admin_only_app(*, data_dir: Path, upload_token: str) -> Flask:
+    """Stub Flask app for the first-boot case where /var/data is empty.
+
+    Exposes ONLY ``/admin/upload-bikemap-db`` (so the operator can populate
+    the disk via ``make upload-db``) and a 200-returning ``/health`` (so
+    Render routes traffic to the worker — otherwise the public URL never
+    becomes reachable and we can't post the upload either). The status
+    field flags the degraded state.
+
+    After a successful upload + Render redeploy, ``create_app``'s normal
+    branch takes over and the full app boots with the real bikemap.db.
+    """
+    from app.routes.admin import build_admin_blueprint
+
+    app = Flask(__name__)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)  # type: ignore[method-assign]
+    # 200 MB cap covers ~75 MB bikemap.db + ~7 MB geojson with headroom;
+    # also stops an unauthenticated DoS from streaming infinite bytes.
+    app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
+
+    app.register_blueprint(build_admin_blueprint(
+        data_dir=data_dir, upload_token=upload_token,
+    ))
+
+    @app.get("/health")
+    def health():  # type: ignore[no-untyped-def]
+        return jsonify({
+            "status": "awaiting_bootstrap",
+            "reason": (
+                "bikemap.db not present in data_dir; POST it via "
+                "/admin/upload-bikemap-db then trigger a redeploy"
+            ),
+        })
 
     return app
 
