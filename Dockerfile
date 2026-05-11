@@ -79,9 +79,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 \
         libxml2 \
         ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 1000 app \
-    && useradd --system --uid 1000 --gid app --home-dir /app --shell /bin/bash app
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder.
 COPY --from=builder /install /install
@@ -98,12 +96,18 @@ COPY prep/ /app/prep/
 COPY tests/ /app/tests/
 COPY pyproject.toml /app/pyproject.toml
 
-# Render persistent disk mount point. The image creates the dir so a
-# fresh `docker run` without a volume still has somewhere to write
-# cache.db (it just won't persist).
-RUN mkdir -p /var/data && chown app:app /var/data /app
-
-USER app
+# Persistent disk mount point. The image creates the dir so a fresh
+# `docker run` without a volume still has somewhere to write cache.db
+# (it just won't persist).
+#
+# The container runs as root. Reason: managed-host persistent volumes
+# (Render disks, Railway volumes) mount as root-owned by default; a
+# non-root container can't write into them without an entrypoint that
+# chowns at startup. Since this is a single-tenant Flask app with no
+# untrusted code execution path, running as root in-container is
+# acceptable for v1. Revisit in v2 hardening with an entrypoint that
+# chowns + drops to a non-root uid via `runuser`.
+RUN mkdir -p /var/data
 
 EXPOSE 8000
 
