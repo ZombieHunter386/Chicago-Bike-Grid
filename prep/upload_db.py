@@ -10,11 +10,14 @@ Invocation
 ==========
 ::
 
-    export RENDER_BASE_URL=https://chicago-bike-advocacy-map.onrender.com
-    export UPLOAD_TOKEN=<secret matching Render env var>
+    export SERVICE_URL=https://chicago-bike-grid-production.up.railway.app
+    export UPLOAD_TOKEN=<secret matching the service's UPLOAD_TOKEN env var>
     python -m prep.upload_db                  # uses data/* defaults
     # or via the Makefile target:
     make upload-db
+
+``RENDER_BASE_URL`` is accepted as an alias for ``SERVICE_URL`` so the
+older invocation pattern still works.
 
 Override the local paths (rare) with::
 
@@ -26,9 +29,9 @@ Service restart
 ===============
 A successful upload only replaces the files on disk. The running
 gunicorn worker still holds the OLD graph in memory until the service
-restarts. After ``upload-db`` succeeds, trigger a Render redeploy
-(dashboard → Manual Deploy → "Deploy latest commit") so the new
-bikemap.db is loaded.
+restarts. After ``upload-db`` succeeds, trigger a redeploy on the host
+platform so the new bikemap.db is loaded (Railway: Deployments tab →
+Redeploy; Render: Manual Deploy → "Deploy latest commit").
 """
 from __future__ import annotations
 
@@ -105,9 +108,12 @@ def main() -> int:
         print(f"error: missing {geojson_path}", file=sys.stderr)
         return 2
 
-    base_url = os.environ.get("RENDER_BASE_URL")
+    base_url = os.environ.get("SERVICE_URL") or os.environ.get("RENDER_BASE_URL")
     if not base_url:
-        print("error: RENDER_BASE_URL is not set", file=sys.stderr)
+        print(
+            "error: SERVICE_URL (or RENDER_BASE_URL, deprecated) is not set",
+            file=sys.stderr,
+        )
         return 2
     token = os.environ.get("UPLOAD_TOKEN")
     if not token:

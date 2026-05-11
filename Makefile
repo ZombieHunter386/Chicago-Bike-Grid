@@ -7,7 +7,7 @@ help:
 	@echo "Targets:"
 	@echo "  dev          - run gunicorn locally against data/bikemap.db"
 	@echo "  refresh      - run prep pipeline (~5 min, rebuilds bikemap.db)"
-	@echo "  upload-db    - push data/bikemap.db + lts-network.geojson.gz to RENDER_BASE_URL"
+	@echo "  upload-db    - push data/bikemap.db + lts-network.geojson.gz to SERVICE_URL"
 	@echo "  test         - ruff + mypy + pytest (fast suite)"
 	@echo "  test-slow    - pytest -m slow (real DB tests)"
 	@echo "  report       - print prep_report.md"
@@ -23,8 +23,11 @@ refresh:
 	$(PYTHON) -m prep.main
 
 upload-db:
-	@: $${RENDER_BASE_URL?Set RENDER_BASE_URL (e.g. https://chicago-bike-advocacy-map.onrender.com)}
-	@: $${UPLOAD_TOKEN?Set UPLOAD_TOKEN (must match Render env var)}
+	@if [ -z "$$SERVICE_URL" ] && [ -z "$$RENDER_BASE_URL" ]; then \
+	  echo "error: SERVICE_URL is required (RENDER_BASE_URL also accepted)" >&2; \
+	  exit 1; \
+	fi
+	@: $${UPLOAD_TOKEN?Set UPLOAD_TOKEN (must match the deployed service's env var)}
 	$(PYTHON) -m prep.upload_db
 
 test:
