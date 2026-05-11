@@ -1,16 +1,35 @@
-requests==2.32.3
-pyyaml==6.0.2
-geopandas==1.0.1
-osmnx==2.0.1
-shapely==2.0.6
-pyproj==3.7.0
-pandas==2.2.3
-python-frontmatter==1.1.0
-python-dotenv==1.0.1
-pytest==8.3.3
-pytest-cov==5.0.0
-responses==0.25.3
-ruff==0.7.4
-mypy==1.13.0
-types-PyYAML==6.0.12.20260408
-types-requests==2.33.0.20260503
+# Direct dependencies for the Chicago Bike Advocacy Map.
+# Curated from production Dockerfile + prep pipeline + dev tooling.
+# Transitive deps resolve via pip; do not pin them here (use a separate
+# lockfile if reproducible builds become a requirement).
+
+# --- Runtime: Flask app + scoring/routing ---
+flask>=3.0,<4
+flask-limiter>=3.5
+gunicorn>=21.2,<27
+scipy>=1.11
+numpy>=2.0
+shapely>=2.0,<3
+pyproj>=3.7,<4
+python-igraph>=0.11,<1
+psutil>=5.9
+requests>=2.32,<3
+
+# --- Prep pipeline: build bikemap.db + lts-network.geojson.gz from sources ---
+# Only used by `python -m prep.main` and the prep tests; bundled in the
+# Docker image so the bench/smoke tests in tests/prep/ can run there too.
+geopandas>=1.0,<2
+osmnx>=2.0,<3
+pandas>=2.2,<3
+python-dotenv>=1.0,<2
+python-frontmatter>=1.1,<2
+pyyaml>=6.0,<7
+
+# --- Tests + dev tooling ---
+pytest>=8.0,<9
+pytest-cov>=5.0,<7
+responses>=0.25,<1
+ruff>=0.7,<0.10
+mypy>=1.13,<2
+types-PyYAML>=6.0
+types-requests>=2.32
