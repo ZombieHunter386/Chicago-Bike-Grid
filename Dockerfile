@@ -107,6 +107,14 @@ USER app
 
 EXPOSE 8000
 
+# Container-level healthcheck. Render uses its own probe via
+# healthCheckPath in render.yaml, but the directive helps `docker run`
+# users + any other-platform deploys notice an unhealthy worker.
+# start-period covers the 30-90s graph load on cold boot (spec §3.10).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD python -c "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status == 200 else 1)" \
+        || exit 1
+
 # Production launch. APP_BOOTSTRAP=1 triggers the lazy-init block at
 # the bottom of app/main.py — without it, gunicorn imports the module
 # but never builds the Flask app. Single worker with 4 threads matches

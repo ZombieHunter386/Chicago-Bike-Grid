@@ -1,9 +1,15 @@
+# Render Web Service definition for chicago-bike-advocacy-map.
+# Per Plan 2C Task 1. Render imports this on the first deploy; subsequent
+# changes go via the dashboard (sync: false fields stay user-managed).
+#
+# UPLOAD_TOKEN is the secret guarding /admin/upload-bikemap-db. Generate
+# with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+# and paste into the dashboard the first time the service is created.
 services:
   - type: web
     name: chicago-bike-advocacy-map
     runtime: docker
-    branch: master
-    rootDir: chicago-bike-advocacy-map
+    branch: main
     dockerfilePath: ./Dockerfile
     plan: starter
     region: oregon
@@ -25,3 +31,7 @@ services:
         value: "1"
       - key: PORT
         value: "8000"
+      # UPLOAD_TOKEN: dashboard-managed (not in git). Wires up
+      # /admin/upload-bikemap-db when set — endpoint 404s when unset.
+      - key: UPLOAD_TOKEN
+        sync: false

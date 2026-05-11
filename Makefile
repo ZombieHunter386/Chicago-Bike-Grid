@@ -7,7 +7,7 @@ help:
 	@echo "Targets:"
 	@echo "  dev          - run gunicorn locally against data/bikemap.db"
 	@echo "  refresh      - run prep pipeline (~5 min, rebuilds bikemap.db)"
-	@echo "  upload-db    - push data/bikemap.db to RENDER_BASE_URL"
+	@echo "  upload-db    - push data/bikemap.db + lts-network.geojson.gz to RENDER_BASE_URL"
 	@echo "  test         - ruff + mypy + pytest (fast suite)"
 	@echo "  test-slow    - pytest -m slow (real DB tests)"
 	@echo "  report       - print prep_report.md"
