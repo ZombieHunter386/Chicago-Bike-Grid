@@ -102,6 +102,17 @@ def create_app(
         limiter=limiter,
     ))
 
+    # Admin upload endpoint is wired ONLY when UPLOAD_TOKEN is set, so
+    # untoken'd deploys don't expose the route at all (404, not 401).
+    # See app/routes/admin.py for the atomicity contract.
+    upload_token = os.environ.get("UPLOAD_TOKEN", "").strip()
+    if upload_token:
+        from app.routes.admin import build_admin_blueprint
+        app.register_blueprint(build_admin_blueprint(
+            data_dir=bikemap_db.parent,
+            upload_token=upload_token,
+        ))
+
     @app.get("/health")
     @limiter.exempt
     def health():  # type: ignore[no-untyped-def]

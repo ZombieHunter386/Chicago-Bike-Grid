@@ -54,24 +54,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# Install runtime + bench dependencies into /install so the runtime stage
-# can copy the tree wholesale. Pinning to the same versions used in
-# .venv (see pyproject.toml + pip list) — the bench needs python-igraph
-# and psutil which aren't in pyproject yet (psutil is a test-only dep).
-RUN pip install --target=/install \
-        "flask>=3.0,<4" \
-        "flask-limiter>=3.5" \
-        "gunicorn>=21.2,<27" \
-        "scipy>=1.11" \
-        "numpy>=2.0" \
-        "shapely>=2.0,<3" \
-        "pyproj>=3.7,<4" \
-        "python-igraph>=0.11,<1" \
-        "psutil>=5.9" \
-        "pytest>=8.0" \
-        "python-frontmatter>=1.1" \
-        "pyyaml>=6.0" \
-        "requests>=2.32,<3"
+# Install dependencies into /install so the runtime stage can copy the
+# tree wholesale. Direct pins live in requirements.txt (single source of
+# truth — same file `make test` reads). Transitives resolve via pip.
+COPY requirements.txt /build/requirements.txt
+RUN pip install --target=/install -r /build/requirements.txt
 
 # ---------- Stage 2: runtime ----------
 FROM python:3.11-slim AS runtime
@@ -119,6 +106,14 @@ RUN mkdir -p /var/data && chown app:app /var/data /app
 USER app
 
 EXPOSE 8000
+
+# Container-level healthcheck. Render uses its own probe via
+# healthCheckPath in render.yaml, but the directive helps `docker run`
+# users + any other-platform deploys notice an unhealthy worker.
+# start-period covers the 30-90s graph load on cold boot (spec §3.10).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
+    CMD python -c "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status == 200 else 1)" \
+        || exit 1
 
 # Production launch. APP_BOOTSTRAP=1 triggers the lazy-init block at
 # the bottom of app/main.py — without it, gunicorn imports the module
