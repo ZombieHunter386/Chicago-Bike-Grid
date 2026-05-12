@@ -482,7 +482,25 @@ state.subscribe(scheduleRouteRender);
 const gapLoading = document.getElementById("gap-loading");
 const gapLoadingText = gapLoading.querySelector(".gap-loading-text");
 let gapDebounceTimer = null;
-let gapRunId = 0;
+// Signature of the (home, dests, tier) we're currently computing or have
+// completed. Used to avoid cancelling an in-flight run when the user
+// drills in/out — the drill change mutates state but doesn't invalidate
+// the gap results, so we should let Run 1 finish instead of starting Run 2
+// and burning the rate limit + creating duplicate server jobs. Set when a
+// run starts; cleared on superseded.
+let gapInFlightSig = null;
+let gapLastDoneSig = null;
+
+function gapSignature(s) {
+  // null-state has its own marker so we still tear down markers when home
+  // is cleared.
+  if (!s.home || !s.destinations.length) return "@empty";
+  const dests = s.destinations
+    .map((d) => `${d.id}@${d.lat.toFixed(5)},${d.lon.toFixed(5)}`)
+    .sort()
+    .join("|");
+  return `h=${s.home.lat.toFixed(5)},${s.home.lon.toFixed(5)}|t=${s.tier}|d=${dests}`;
+}
 
 function scheduleGapAnalysis() {
   if (gapDebounceTimer) clearTimeout(gapDebounceTimer);
@@ -492,10 +510,18 @@ function scheduleGapAnalysis() {
     if (!s.home || !s.destinations.length) {
       renderAvoidedIntersections(map, []);
       gapLoading.hidden = true;
+      gapInFlightSig = null;
+      gapLastDoneSig = "@empty";
       return;
     }
 
-    const runId = ++gapRunId;
+    const sig = gapSignature(s);
+    // Already running for this exact input — let it finish, don't start a duplicate.
+    if (sig === gapInFlightSig) return;
+    // Already completed for this exact input — nothing to recompute.
+    if (sig === gapLastDoneSig) return;
+
+    gapInFlightSig = sig;
     const total = s.destinations.length;
     let done = 0;
     gapLoading.hidden = false;
@@ -514,7 +540,7 @@ function scheduleGapAnalysis() {
           console.warn(`gap-analysis failed for ${d.id}`, err);
         } finally {
           done += 1;
-          if (runId === gapRunId) {
+          if (sig === gapInFlightSig) {
             gapLoadingText.textContent =
               `Computing gap analysis… (${done}/${total} destinations)`;
           }
@@ -522,8 +548,13 @@ function scheduleGapAnalysis() {
       }),
     );
 
-    // Bail if a newer run started.
-    if (runId !== gapRunId) return;
+    // Bail if a newer run took over while we were in flight. Otherwise
+    // commit results, mark this signature done so a no-op re-trigger
+    // (e.g., drilldown enter) skips the work.
+    if (gapInFlightSig !== sig) return;
+    gapInFlightSig = null;
+    gapLastDoneSig = sig;
+
     lastGapResults.clear();
     for (const [k, v] of perPairResults) lastGapResults.set(k, v);
     const aggregated = aggregateGaps(perPairResults);

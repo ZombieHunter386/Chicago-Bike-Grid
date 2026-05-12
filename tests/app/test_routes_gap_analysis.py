@@ -79,3 +79,45 @@ def test_gap_analysis_status_404_for_unknown_job(gap_app) -> None:
     client = gap_app.test_client()
     resp = client.get("/gap-analysis/status?job=nonsense")
     assert resp.status_code == 404
+
+
+def test_gap_analysis_dedupes_in_flight_jobs_by_cache_key(gap_app) -> None:
+    """Two rapid POSTs with identical (home, dest, tier) must share a single
+    Future, not queue duplicate work in the executor. The endpoint returns
+    the same job_id (== cache_key) for both, and polling either job_id
+    converges to the same ready result.
+
+    Pre-fix, a state-mutation storm (drill-down enter/exit, tier toggle,
+    etc.) could burn the 10-req/min rate limit budget on duplicate work
+    AND swamp the 3-worker executor pool. After dedup, identical input
+    short-circuits to the existing future.
+    """
+    client = gap_app.test_client()
+    body = {
+        "home": {"lat": 41.940, "lon": -87.680},
+        "dest": {"lat": 41.935, "lon": -87.675},
+        "tier": "any",
+    }
+    first = client.post("/gap-analysis", json=body)
+    assert first.status_code == 202
+    job_id_1 = first.get_json()["job_id"]
+
+    # Second POST while the first is still in flight (no wait between)
+    # should return the same job_id.
+    second = client.post("/gap-analysis", json=body)
+    # If the future completed between the two POSTs, the second is a
+    # cache hit (200, "ready") — also acceptable. The bug we're guarding
+    # against is a NEW running job with a different job_id.
+    if second.status_code == 202:
+        job_id_2 = second.get_json()["job_id"]
+        assert job_id_2 == job_id_1, (
+            "duplicate POST returned a new job_id; dedup is broken"
+        )
+    else:
+        # Cache hit path — fine; the test for that lives above.
+        assert second.status_code == 200
+        assert second.get_json()["status"] == "ready"
+
+    # Either way, the original job should complete.
+    final = _wait_until_ready(client, job_id_1)
+    assert final["status"] == "ready"

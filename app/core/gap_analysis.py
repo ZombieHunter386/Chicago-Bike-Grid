@@ -355,6 +355,24 @@ def analyze_gap(
     zone = _detour_zone_proj(snap, fast, safe)
     candidates = _enumerate_candidates(snap, zone, tier_max_lts)
 
+    # Restrict candidates to features ON the fast route (option B in the
+    # bug-2 design discussion). The detour-zone enumerator includes any
+    # feature within DETOUR_BUFFER_M (200m) of either route; some of those
+    # land 1-2 blocks off either polyline, which reads as "random nearby
+    # street" to the user and adds noise to the advocacy ask. Restricting
+    # to fast-route features makes every marker a literal "this is the
+    # stressful street your safe route is detouring around" — directly
+    # answering the user's "why is my safe route going here?" question.
+    # Spec §4.5's "missing connection 2 blocks east" case is excluded as
+    # a deliberate tradeoff for clarity over completeness.
+    fast_road_ids = {int(snap.edge_road_id[e]) for e in fast.edge_path}
+    fast_int_ids = {int(snap.vertex_to_int_id[v]) for v in fast.vertex_path}
+    candidates = [
+        c for c in candidates
+        if (c["feature_kind"] == "segment" and c["feature_id"] in fast_road_ids)
+        or (c["feature_kind"] == "intersection" and c["feature_id"] in fast_int_ids)
+    ]
+
     base_main = snap.base_weights_by_tier[tier]
     base_fb = snap.fallback_weights_by_tier[tier]
     current_safe_length = safe.length_m

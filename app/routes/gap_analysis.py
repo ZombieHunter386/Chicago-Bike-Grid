@@ -7,7 +7,6 @@ Client polls /gap-analysis/status?job= every 1.5s (per spec §3.5).
 from __future__ import annotations
 
 import time
-import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -65,7 +64,15 @@ def build_gap_analysis_blueprint(
 ) -> Blueprint:
     bp = Blueprint("gap_analysis", __name__)
     executor = ThreadPoolExecutor(max_workers=3)
-    jobs: dict[str, tuple[Future, float]] = {}  # job_id -> (future, submitted_at)
+    # Keyed by cache_key (NOT a random uuid) so duplicate POSTs from the
+    # same client (or different clients) for the same (home, dest, tier)
+    # reuse one in-flight Future. Previously every POST queued a fresh
+    # worker job; on a state-mutation storm (drilldown enter/exit, tier
+    # toggle, etc.) the executor's 3-worker pool got swamped with duplicate
+    # work, slowed all responses, and burnt through the 10-req/min rate
+    # limit budget pointlessly. Externally the cache_key doubles as the
+    # job_id — opaque hex string, fine for a polling identifier.
+    jobs: dict[str, tuple[Future, float]] = {}  # cache_key -> (future, submitted_at)
 
     def _gc_jobs() -> None:
         """Drop stale completed/failed futures."""
@@ -112,10 +119,16 @@ def build_gap_analysis_blueprint(
             return jsonify({"status": "ready", "result": cached}), 200
 
         _gc_jobs()
-        job_id = uuid.uuid4().hex
+        # Dedupe: if a future for this key is already in flight, return its
+        # job_id rather than submitting a duplicate. Identical (home, dest,
+        # tier) → identical work → one shared Future.
+        existing = jobs.get(key)
+        if existing is not None and not existing[0].done():
+            return jsonify({"status": "running", "job_id": key}), 202
+
         fut = executor.submit(_compute, h, d, tier)
-        jobs[job_id] = (fut, time.time())
-        return jsonify({"status": "running", "job_id": job_id}), 202
+        jobs[key] = (fut, time.time())
+        return jsonify({"status": "running", "job_id": key}), 202
 
     @bp.get("/gap-analysis/status")
     def status():
