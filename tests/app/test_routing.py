@@ -63,6 +63,41 @@ def test_safe_route_records_lts_distribution(tiny_bikemap_db: Path) -> None:
     assert sum(r.lts_distribution.values()) == len(r.edge_path)
 
 
+def test_route_carries_per_edge_lts(divergent_bikemap_db: Path) -> None:
+    """edge_lts is the per-edge effective LTS the frontend uses to color the
+    safe-route polyline green (LTS 1) / orange (LTS 2) / red (LTS 3) per
+    segment. Length must match edge_path; values must be the max of
+    seg_lts and head_node lts_approach for each directed edge."""
+    snap = load_graph(divergent_bikemap_db)
+    v10 = vertex_for_int_id(snap, 10)
+    v40 = vertex_for_int_id(snap, 40)
+    assert v10 is not None and v40 is not None
+
+    # Fast route uses r3 (direct LTS-3 edge); edge_lts should be [3].
+    fast = compute_fast_route(snap, v10, v40)
+    assert fast is not None
+    assert len(fast.edge_lts) == len(fast.edge_path)
+    assert fast.edge_lts == [3]
+
+    # Safe route at parent tier uses r1 + r2 (LTS-1 detour); edge_lts == [1, 1].
+    # (Intersection lts_approach is 1 throughout this fixture, so eff == seg_lts.)
+    safe = compute_safe_route(snap, v10, v40, "parent")
+    assert safe is not None
+    assert len(safe.edge_lts) == len(safe.edge_path)
+    assert safe.edge_lts == [1, 1]
+
+
+def test_trivial_route_has_empty_edge_lts(tiny_bikemap_db: Path) -> None:
+    """src == dst yields zero-length route; edge_lts must be the empty list
+    so frontend split-by-LTS rendering doesn't try to index into nothing."""
+    snap = load_graph(tiny_bikemap_db)
+    v100 = vertex_for_int_id(snap, 100)
+    assert v100 is not None
+    r = compute_fast_route(snap, v100, v100)
+    assert r is not None
+    assert r.edge_lts == []
+
+
 def test_compute_routes_return_trivial_route_when_src_equals_dst(
     tiny_bikemap_db: Path,
 ) -> None:

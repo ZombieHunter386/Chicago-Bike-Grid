@@ -73,3 +73,31 @@ def test_routes_get_method_disallowed(routes_app) -> None:
     client = routes_app.test_client()
     resp = client.get("/routes?home_lat=41.94&home_lon=-87.68&dest_lat=41.94&dest_lon=-87.67&tier=any")
     assert resp.status_code == 405
+
+
+def test_routes_payload_carries_polyline_lts_matching_segment_count(routes_app) -> None:
+    """Each route's polyline_lts holds one LTS value per polyline SEGMENT,
+    so polyline_lts.length == polyline.length - 1. The frontend uses this to
+    split the safe-route LineString into one Feature per contiguous same-LTS
+    run, coloring green / orange / red per segment."""
+    client = routes_app.test_client()
+    resp = client.post("/routes", json={
+        "home": {"lat": 41.940, "lon": -87.680},
+        "dest": {"lat": 41.940, "lon": -87.670},
+        "tier": "any",
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    for kind in ("fast", "safe"):
+        route = data[kind]
+        assert "polyline_lts" in route, f"{kind} missing polyline_lts"
+        polyline = route["polyline"]
+        polyline_lts = route["polyline_lts"]
+        # N-vertex polyline has N-1 segments; LTS list length must match.
+        assert len(polyline_lts) == max(0, len(polyline) - 1), (
+            f"{kind}: polyline_lts has {len(polyline_lts)} entries but "
+            f"polyline has {len(polyline)} vertices (expected {len(polyline) - 1})"
+        )
+        # Every LTS value must be 1, 2, or 3 (the only legal LTS levels).
+        for v in polyline_lts:
+            assert v in (1, 2, 3), f"{kind}: unexpected LTS value {v}"

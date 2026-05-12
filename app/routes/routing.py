@@ -27,8 +27,13 @@ def _route_to_payload(snap: GraphSnapshot, r: Route | None) -> dict | None:
          "lon": float(snap.vertex_coords_wgs84[v][1])}
         for v in r.vertex_path
     ]
+    # polyline_lts[i] is the effective LTS of the segment connecting
+    # polyline[i] → polyline[i+1]. Length is len(polyline) - 1. Frontend
+    # uses this to color the safe route green-on-tier / amber-off-tier
+    # per segment (per spec §2.2).
     return {
         "polyline": polyline,
+        "polyline_lts": list(r.edge_lts),
         "length_m": r.length_m,
         "is_fallback": r.is_fallback,
         "lts_distribution": r.lts_distribution,

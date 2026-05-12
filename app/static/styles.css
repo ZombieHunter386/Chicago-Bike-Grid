@@ -47,6 +47,27 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 #tier-selector button[data-tier="any"].active { background: #6b7280; }
 .lts-allowance { font-size: 12px; opacity: 0.75; margin-left: 4px; }
 
+/* Route color legend. Sits bottom-right above the maplibre attribution.
+   Each route segment is colored by its raw LTS, so the legend maps colors
+   to LTS levels + tier-friendly names (same wording as /explore). */
+#route-legend {
+  position: absolute; bottom: 24px; right: 12px;
+  background: var(--c-bg); border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+  padding: 8px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  font: 12px var(--font-stack); color: var(--c-text);
+  pointer-events: none;
+}
+.rl-item { display: flex; align-items: center; gap: 6px; }
+.rl-swatch {
+  display: inline-block;
+  width: 18px; height: 4px; border-radius: 2px;
+}
+.rl-swatch.rl-lts-1 { background: #16a34a; }
+.rl-swatch.rl-lts-2 { background: #f59e0b; }
+.rl-swatch.rl-lts-3 { background: #dc2626; }
+
 #home-form {
   position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 4px; flex-wrap: wrap;

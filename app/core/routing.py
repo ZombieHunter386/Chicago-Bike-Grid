@@ -26,6 +26,7 @@ from app.core.weights import INF_WEIGHT
 class Route:
     edge_path: list[int]               # igraph edge indices in order
     vertex_path: list[int]             # igraph vertex indices
+    edge_lts: list[int]                # per-edge effective LTS (max of seg_lts and head_lts), length = len(edge_path); empty for trivial routes
     length_m: float                    # sum of edge_length_m along the path
     weighted_cost: float               # sum of weights along the path
     is_fallback: bool                  # True if main weights yielded no path
@@ -45,17 +46,24 @@ def _build_route(snap: GraphSnapshot, edge_path: list[int],
     length = float(sum(snap.edge_length_m[e] for e in edge_path))
     cost = float(sum(weights[e] for e in edge_path))
     lts_hist: Counter[int] = Counter()
+    # Per-edge effective LTS. Used by the frontend to color the safe route
+    # green-on-tier / amber-off-tier per segment (so a best-effort safe
+    # route is visibly distinct in its stressful subsegments instead of
+    # showing as a single amber blob).
+    edge_lts: list[int] = []
     for e in edge_path:
         # Cast np.int8 scalar to Python int so Counter keys are clean ints
         # (avoids `np.int8` keys leaking into JSON serialization downstream).
         eff = int(max(snap.edge_seg_lts[e], snap.edge_head_lts[e]))
         lts_hist[eff] += 1
+        edge_lts.append(eff)
     vertices = [snap.g.es[edge_path[0]].source]
     for e in edge_path:
         vertices.append(snap.g.es[e].target)
     return Route(
         edge_path=list(edge_path),
         vertex_path=vertices,
+        edge_lts=edge_lts,
         length_m=length,
         weighted_cost=cost,
         is_fallback=is_fallback,
@@ -68,6 +76,7 @@ def _trivial_route(src: int) -> Route:
     return Route(
         edge_path=[],
         vertex_path=[src],
+        edge_lts=[],
         length_m=0.0,
         weighted_cost=0.0,
         is_fallback=False,

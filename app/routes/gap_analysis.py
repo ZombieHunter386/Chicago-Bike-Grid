@@ -40,6 +40,7 @@ def _serialize(result: GapResult, snap: GraphSnapshot) -> dict[str, Any]:
         ]
         return {
             "polyline": polyline,
+            "polyline_lts": list(r.edge_lts),
             "edge_count": len(r.edge_path),
             "length_m": r.length_m,
             "is_fallback": r.is_fallback,

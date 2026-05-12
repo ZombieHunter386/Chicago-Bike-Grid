@@ -18,6 +18,15 @@
       <button data-tier="parent" type="button">Safe for parent <span class="lts-allowance">(LTS 1-2)</span></button>
       <button data-tier="any" type="button" class="active">Not safe <span class="lts-allowance">(LTS 1-3)</span></button>
     </div>
+    <!-- Route color legend. Each polyline segment is colored by its raw
+         LTS level (same scheme as /explore), not by whether it's on-tier.
+         The labels carry the tier-name mapping so users decode the colors
+         without leaving the main view. -->
+    <div id="route-legend">
+      <span class="rl-item"><span class="rl-swatch rl-lts-1"></span>LTS 1 · Safe for kid</span>
+      <span class="rl-item"><span class="rl-swatch rl-lts-2"></span>LTS 2 · Safe for parent</span>
+      <span class="rl-item"><span class="rl-swatch rl-lts-3"></span>LTS 3 · Not safe</span>
+    </div>
     <form id="home-form">
       <input id="home-input" type="text" placeholder="Enter a location (Chicago)" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="home-suggest" aria-expanded="false">
       <button type="submit">Set location</button>

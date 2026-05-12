@@ -82,29 +82,74 @@ const routeLayers = new Set();
 function routeSourceId(destId, kind) { return `route-${destId}-${kind}-src`; }
 function routeLayerId(destId, kind) { return `route-${destId}-${kind}-lyr`; }
 
-// Build a LineString that visually starts at `home` and ends at `dest`,
-// not at the nearest-intersection vertices the routing engine snaps to.
-// Without the home/dest endpoints prepended/appended, the polyline can
-// overshoot the markers by 50-200m (whichever direction the snap pulled
-// it) and the route appears to start somewhere past the user's address.
-// Callers pass {lat, lon} for both endpoints.
-function lineStringFromPolyline(polyline, home, dest) {
-  const coords = [
-    [home.lon, home.lat],
-    ...polyline.map((p) => [p.lon, p.lat]),
-    [dest.lon, dest.lat],
-  ];
-  return {
-    type: "Feature",
-    geometry: { type: "LineString", coordinates: coords },
-    properties: {},
-  };
+// Build GeoJSON for a route polyline. The endpoints are clipped to the
+// user's home and destination markers (the polyline's first/last vertices
+// are nearest-intersection snaps that overshoot the marker positions).
+//
+// `polyline_lts` is the per-segment effective LTS array from the backend
+// (one entry per polyline segment, i.e. length == polyline.length - 1).
+//
+// `splitByLts` controls the output shape:
+//   - false → single LineString Feature (used for the fast route, which
+//             gets a uniform dashed orange paint regardless of stress).
+//   - true  → FeatureCollection where each Feature is a contiguous run
+//             of same-LTS segments, with properties.lts set. Used for
+//             the safe route so the layer paint can color green / orange /
+//             red per LTS level (mockup §2.1 + spec §2.2 advocacy framing).
+function lineStringFromPolyline(polyline, polyline_lts, home, dest, splitByLts) {
+  if (!polyline || polyline.length < 2) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  if (!splitByLts || !Array.isArray(polyline_lts) || polyline_lts.length === 0) {
+    const coords = [
+      [home.lon, home.lat],
+      ...polyline.map((p) => [p.lon, p.lat]),
+      [dest.lon, dest.lat],
+    ];
+    return {
+      type: "Feature",
+      geometry: { type: "LineString", coordinates: coords },
+      properties: {},
+    };
+  }
+  // Walk the polyline segment by segment, grouping consecutive same-LTS
+  // segments into one Feature. Adjacent features share their boundary
+  // vertex so the rendered line has no visible gap between color bands.
+  const features = [];
+  let runStart = 0;
+  let runLts = polyline_lts[0];
+  for (let segIdx = 1; segIdx <= polyline_lts.length; segIdx++) {
+    const isEnd = segIdx === polyline_lts.length;
+    const nextLts = isEnd ? null : polyline_lts[segIdx];
+    if (isEnd || nextLts !== runLts) {
+      const coords = [];
+      for (let i = runStart; i <= segIdx; i++) {
+        coords.push([polyline[i].lon, polyline[i].lat]);
+      }
+      // Endpoint clip — prepend home only on the first feature, append
+      // dest only on the last.
+      if (runStart === 0) coords.unshift([home.lon, home.lat]);
+      if (isEnd) coords.push([dest.lon, dest.lat]);
+      features.push({
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: coords },
+        properties: { lts: runLts },
+      });
+      runStart = segIdx;
+      runLts = nextLts;
+    }
+  }
+  return { type: "FeatureCollection", features };
 }
 
 function ensureRouteLayer(map, destId, kind, route, home, dest) {
   const srcId = routeSourceId(destId, kind);
   const lyrId = routeLayerId(destId, kind);
-  const geojson = lineStringFromPolyline(route.polyline, home, dest);
+  // Safe routes get per-segment LTS coloring. Fast routes stay uniform
+  // dashed orange — they're the "ignore stress" reference line, and
+  // coloring them by LTS would muddy the safe-vs-fast comparison.
+  const splitByLts = (kind === "safe");
+  const geojson = lineStringFromPolyline(route.polyline, route.polyline_lts, home, dest, splitByLts);
 
   if (map.getSource(srcId)) {
     map.getSource(srcId).setData(geojson);
@@ -112,7 +157,10 @@ function ensureRouteLayer(map, destId, kind, route, home, dest) {
     map.addSource(srcId, { type: "geojson", data: geojson });
   }
 
-  // Paint properties differ by kind + fallback state.
+  // Paint differs by kind. Fast is a single color (uniform feature, no
+  // properties to read). Safe is colored per-feature via a `match` on
+  // properties.lts — matches the /explore color scheme exactly so users
+  // have one mental model across both views.
   let paint;
   if (kind === "fast") {
     paint = {
@@ -120,15 +168,17 @@ function ensureRouteLayer(map, destId, kind, route, home, dest) {
       "line-width": 4,
       "line-dasharray": [2, 2],
     };
-  } else if (route.is_fallback) {
-    paint = {
-      "line-color": "#f59e0b",      // var(--c-fallback) — amber
-      "line-width": 4,
-      "line-dasharray": [3, 3],
-    };
   } else {
     paint = {
-      "line-color": "#16a34a",      // var(--c-safe) — solid green
+      // Same hex values used by /explore (LTS_COLOR_EXPR in explore.js)
+      // and by the legend swatches below the tier selector.
+      "line-color": [
+        "match", ["get", "lts"],
+        1, "#16a34a",   // green — LTS 1 (safe for kid)
+        2, "#f59e0b",   // orange — LTS 2 (safe for parent)
+        3, "#dc2626",   // red — LTS 3 (not safe)
+        "#999999",      // fallback for unknown LTS values
+      ],
       "line-width": 4,
     };
   }
