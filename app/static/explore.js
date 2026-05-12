@@ -144,10 +144,16 @@ async function init() {
   toggleBtn.disabled = true;
   toggleBtn.textContent = "Loading data…";
   try {
-    const mapLoaded = map.loaded()
+    // Use isStyleLoaded() + style.load instead of loaded() + load — the
+    // latter never resolves on this machine because openfreemap tile
+    // requests continuously flap loaded() back to false, AND the load
+    // event has already fired by the time we attach a listener here.
+    // isStyleLoaded()/style.load is the same pattern the main app uses
+    // in app.js (renderRoutes); it actually fires once and stays stable.
+    const styleReady = map.isStyleLoaded()
       ? Promise.resolve()
-      : new Promise((r) => map.once("load", r));
-    await Promise.all([loadNetwork(), mapLoaded]);
+      : new Promise((r) => map.once("style.load", r));
+    await Promise.all([loadNetwork(), styleReady]);
     addLayers();
     applyInitialHin();
     document.getElementById("legend").hidden = false;
