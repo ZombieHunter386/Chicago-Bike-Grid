@@ -36,6 +36,26 @@ toggleBtn.addEventListener("click", () => {
   basemap = basemap === "streets" ? "satellite" : "streets";
   map.setStyle(basemap === "satellite" ? SATELLITE_STYLE : STREETS_STYLE);
   toggleBtn.textContent = basemap === "streets" ? "Satellite" : "Streets";
+  // setStyle wipes all sources/layers we added (LTS streets, intersections,
+  // HIN). Re-add them once the new style is loaded. We listen to `data`
+  // events with `dataType === "style"` rather than `style.load` — the
+  // latter does NOT fire on subsequent setStyle calls in this maplibre
+  // build (confirmed via event-trace; only `data:style`, `styledata:style`,
+  // and `sourcedata:source` fire). One-shot listener: registers, fires
+  // exactly once when the style data lands, removes itself.
+  const onceStyleLoaded = (fn) => {
+    const listener = (e) => {
+      if (e.dataType !== "style") return;
+      map.off("data", listener);
+      fn();
+    };
+    map.on("data", listener);
+  };
+  onceStyleLoaded(() => {
+    addLayers();
+    applyInitialHin();
+    applyIntersectionVisibility(intersectionsCheckbox.checked);
+  });
 });
 
 // Module-scope cache so basemap toggle can re-add layers without re-fetching.
@@ -156,8 +176,10 @@ async function init() {
     await Promise.all([loadNetwork(), styleReady]);
     addLayers();
     applyInitialHin();
+    applyIntersectionVisibility(intersectionsCheckbox.checked);
     document.getElementById("legend").hidden = false;
     document.getElementById("hin-toggle").hidden = false;
+    document.getElementById("intersections-toggle").hidden = false;
     toggleBtn.disabled = false;
     toggleBtn.textContent = "Satellite";
   } catch (err) {
@@ -176,10 +198,22 @@ async function init() {
 errorRetry.addEventListener("click", () => init());
 init();
 
-// Re-add layers on basemap swap (setStyle wipes them).
-map.on("style.load", () => {
-  addLayers();
-  applyInitialHin();  // re-honor ?hin=1 after basemap swap
+// (Basemap swap re-add is wired inside the toggleBtn click handler via
+//  map.once("style.load", ...) — see comment there for the reason a
+//  permanent map.on(...) listener didn't work.)
+
+// Intersection-layer toggle. Defaults to "on" because the layer was always
+// visible before this control existed; users who want to inspect only the
+// street stress without the intersection clutter can untick it.
+const intersectionsCheckbox = document.getElementById("intersections-checkbox");
+
+function applyIntersectionVisibility(checked) {
+  if (!map.getLayer("intersections-layer")) return;
+  map.setLayoutProperty("intersections-layer", "visibility", checked ? "visible" : "none");
+}
+
+intersectionsCheckbox.addEventListener("change", () => {
+  applyIntersectionVisibility(intersectionsCheckbox.checked);
 });
 
 // HIN overlay toggle + URL permalink (?hin=1).

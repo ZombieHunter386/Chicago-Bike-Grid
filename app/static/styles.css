@@ -418,8 +418,9 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   box-shadow: 0 0 0 1px white;
 }
 
-#hin-toggle {
-  position: absolute; top: 12px; right: 200px;
+#hin-toggle,
+#intersections-toggle {
+  position: absolute; top: 12px;
   background: var(--c-bg); border: 1px solid var(--c-border);
   border-radius: var(--radius-panel); box-shadow: var(--shadow-panel);
   padding: 8px 12px;
@@ -427,8 +428,13 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   display: flex; align-items: center; gap: 6px;
   cursor: pointer;
 }
-#hin-toggle[hidden] { display: none; }
-#hin-toggle input { cursor: pointer; }
+#hin-toggle { right: 200px; }
+/* Stack the intersection toggle to the left of the HIN toggle. */
+#intersections-toggle { right: 440px; }
+#hin-toggle[hidden],
+#intersections-toggle[hidden] { display: none; }
+#hin-toggle input,
+#intersections-toggle input { cursor: pointer; }
 
 #explore-error {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
