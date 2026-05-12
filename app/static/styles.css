@@ -114,27 +114,34 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 }
 #home-error:empty { display: none; }
 
-/* Type-ahead suggestions dropdown under the home-input. flex-basis:100%
-   on a parent flex wrap forces the UL onto its own row directly below
-   the input row, so the list spans the full panel width regardless of
-   the Set Location button width. */
-#home-suggest {
+/* Type-ahead suggestions dropdown — shared style between the home-input
+   (top of page) and the custom-destination input (sidebar). flex-basis:100%
+   on the parent flex wrap forces each UL onto its own row directly below
+   its input, so the list spans the full panel width regardless of button
+   width. */
+#home-suggest,
+#custom-suggest {
   flex-basis: 100%;
   list-style: none; margin: 4px 0 0; padding: 0;
   background: white; border: 1px solid var(--c-border);
   border-radius: 6px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.15);
   max-height: 260px; overflow-y: auto;
 }
-#home-suggest[hidden] { display: none; }
-.home-suggest-item {
+#home-suggest[hidden],
+#custom-suggest[hidden] { display: none; }
+.home-suggest-item,
+.custom-suggest-item {
   padding: 8px 10px;
   font: 13px var(--font-stack); color: var(--c-text);
   cursor: pointer;
   border-bottom: 1px solid #f1f5f9;
 }
-.home-suggest-item:last-child { border-bottom: none; }
+.home-suggest-item:last-child,
+.custom-suggest-item:last-child { border-bottom: none; }
 .home-suggest-item:hover,
-.home-suggest-item.selected {
+.home-suggest-item.selected,
+.custom-suggest-item:hover,
+.custom-suggest-item.selected {
   background: #ecfdf5; color: var(--c-text);
 }
 
@@ -166,6 +173,7 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 
 #custom-form {
   display: flex; gap: 4px; margin-top: 10px;
+  flex-wrap: wrap;     /* lets #custom-suggest claim its own row below the input */
 }
 #custom-input {
   flex: 1; min-width: 0;

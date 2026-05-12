@@ -79,8 +79,9 @@
       </ul>
       <p class="caveat">We picked the nearest by straight-line distance. If that's not the place you actually go, add it as a custom destination below.</p>
       <form id="custom-form">
-        <input id="custom-input" type="text" placeholder="Add a custom destination" autocomplete="off">
+        <input id="custom-input" type="text" placeholder="Add a custom destination" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="custom-suggest" aria-expanded="false">
         <button type="submit">Add</button>
+        <ul id="custom-suggest" role="listbox" hidden></ul>
       </form>
       <div id="custom-error" role="alert"></div>
       <!-- Resolved destinations list — populated dynamically by app.js from

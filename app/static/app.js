@@ -92,111 +92,127 @@ homeForm.addEventListener("submit", async (e) => {
   }
 });
 
-// ----- Home-input type-ahead autocomplete -----
+// ----- Type-ahead autocomplete (shared by home + custom-destination) -----
 // Debounced 400ms — under Nominatim's 1 req/sec throttle and the
-// MIN_INTERVAL_S=1.1s server-side block. Latest-wins via a generation
-// counter: if the user keeps typing while a request is in flight, the
-// older request's results are discarded when the next keystroke fires.
-const homeSuggest = document.getElementById("home-suggest");
-let suggestDebounce = null;
-let suggestGen = 0;
-let selectedIdx = -1;
+// MIN_INTERVAL_S=1.1s server-side block. Latest-wins via a per-instance
+// generation counter: if the user keeps typing while a request is in
+// flight, the older request's results are discarded when the next
+// keystroke fires.
+//
+// attachAutocomplete wires one (input, dropdown UL) pair. onPick(result)
+// is called with {lat, lon, display_name, place_id} when the user
+// clicks a suggestion or presses Enter on a highlighted item.
+function attachAutocomplete({ inputEl, listEl, formEl, itemClass, onPick }) {
+  if (!inputEl || !listEl) return;
+  let debounce = null;
+  let gen = 0;
+  let selectedIdx = -1;
 
-function closeSuggestions() {
-  if (!homeSuggest) return;
-  homeSuggest.innerHTML = "";
-  homeSuggest.hidden = true;
-  homeInput.setAttribute("aria-expanded", "false");
-  selectedIdx = -1;
-}
-
-function renderSuggestions(results) {
-  if (!homeSuggest) return;
-  if (!results.length) { closeSuggestions(); return; }
-  homeSuggest.innerHTML = "";
-  for (const [i, r] of results.entries()) {
-    const li = document.createElement("li");
-    li.className = "home-suggest-item";
-    li.dataset.idx = String(i);
-    li.dataset.lat = String(r.lat);
-    li.dataset.lon = String(r.lon);
-    li.dataset.displayName = r.display_name;
-    li.setAttribute("role", "option");
-    li.textContent = r.display_name;
-    homeSuggest.appendChild(li);
+  function close() {
+    listEl.innerHTML = "";
+    listEl.hidden = true;
+    inputEl.setAttribute("aria-expanded", "false");
+    selectedIdx = -1;
   }
-  homeSuggest.hidden = false;
-  homeInput.setAttribute("aria-expanded", "true");
-  selectedIdx = -1;
-}
 
-function applySelected(idx) {
-  const items = homeSuggest.querySelectorAll(".home-suggest-item");
-  for (const [i, el] of items.entries()) {
-    el.classList.toggle("selected", i === idx);
-  }
-  if (idx >= 0 && items[idx]) {
-    homeInput.value = items[idx].dataset.displayName;
-  }
-  selectedIdx = idx;
-}
-
-function pickSuggestion(li) {
-  const lat = parseFloat(li.dataset.lat);
-  const lon = parseFloat(li.dataset.lon);
-  const displayName = li.dataset.displayName;
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-  homeInput.value = displayName;
-  closeSuggestions();
-  state.setHome({ lat, lon, displayName, approximate: false });
-}
-
-homeInput.addEventListener("input", () => {
-  const q = homeInput.value.trim();
-  if (suggestDebounce) clearTimeout(suggestDebounce);
-  if (q.length < 3) { closeSuggestions(); return; }
-  const gen = ++suggestGen;
-  suggestDebounce = setTimeout(async () => {
-    try {
-      const results = await api.geocodeSuggest(q);
-      if (gen !== suggestGen) return; // newer keystroke superseded us
-      renderSuggestions(results);
-    } catch (err) {
-      // suggestions are best-effort; never surface an error here
-      if (gen === suggestGen) closeSuggestions();
+  function render(results) {
+    if (!results.length) { close(); return; }
+    listEl.innerHTML = "";
+    for (const r of results) {
+      const li = document.createElement("li");
+      li.className = itemClass;
+      li.dataset.lat = String(r.lat);
+      li.dataset.lon = String(r.lon);
+      li.dataset.displayName = r.display_name;
+      li.setAttribute("role", "option");
+      li.textContent = r.display_name;
+      listEl.appendChild(li);
     }
-  }, 400);
-});
-
-homeInput.addEventListener("keydown", (e) => {
-  if (homeSuggest.hidden) return;
-  const items = homeSuggest.querySelectorAll(".home-suggest-item");
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    applySelected(Math.min(items.length - 1, selectedIdx + 1));
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    applySelected(Math.max(-1, selectedIdx - 1));
-  } else if (e.key === "Enter" && selectedIdx >= 0) {
-    e.preventDefault();
-    pickSuggestion(items[selectedIdx]);
-  } else if (e.key === "Escape") {
-    closeSuggestions();
+    listEl.hidden = false;
+    inputEl.setAttribute("aria-expanded", "true");
+    selectedIdx = -1;
   }
-});
 
-homeSuggest.addEventListener("mousedown", (e) => {
-  // mousedown (not click) so blur on the input doesn't close the dropdown
-  // before we can read which item was clicked.
-  const li = e.target.closest(".home-suggest-item");
-  if (!li) return;
-  e.preventDefault();
-  pickSuggestion(li);
-});
+  function applySelected(idx) {
+    const items = listEl.querySelectorAll("." + itemClass);
+    for (const [i, el] of items.entries()) {
+      el.classList.toggle("selected", i === idx);
+    }
+    if (idx >= 0 && items[idx]) {
+      inputEl.value = items[idx].dataset.displayName;
+    }
+    selectedIdx = idx;
+  }
 
-// Close suggestions on click anywhere outside the form.
-document.addEventListener("click", (e) => {
-  if (!homeForm.contains(e.target)) closeSuggestions();
+  function pick(li) {
+    const lat = parseFloat(li.dataset.lat);
+    const lon = parseFloat(li.dataset.lon);
+    const displayName = li.dataset.displayName;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    inputEl.value = displayName;
+    close();
+    onPick({ lat, lon, display_name: displayName });
+  }
+
+  inputEl.addEventListener("input", () => {
+    const q = inputEl.value.trim();
+    if (debounce) clearTimeout(debounce);
+    if (q.length < 3) { close(); return; }
+    const myGen = ++gen;
+    debounce = setTimeout(async () => {
+      try {
+        const results = await api.geocodeSuggest(q);
+        if (myGen !== gen) return; // newer keystroke superseded us
+        render(results);
+      } catch (err) {
+        if (myGen === gen) close();
+      }
+    }, 400);
+  });
+
+  inputEl.addEventListener("keydown", (e) => {
+    if (listEl.hidden) return;
+    const items = listEl.querySelectorAll("." + itemClass);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      applySelected(Math.min(items.length - 1, selectedIdx + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      applySelected(Math.max(-1, selectedIdx - 1));
+    } else if (e.key === "Enter" && selectedIdx >= 0) {
+      e.preventDefault();
+      pick(items[selectedIdx]);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+
+  listEl.addEventListener("mousedown", (e) => {
+    // mousedown (not click) so blur on the input doesn't close the dropdown
+    // before we can read which item was clicked.
+    const li = e.target.closest("." + itemClass);
+    if (!li) return;
+    e.preventDefault();
+    pick(li);
+  });
+
+  // Close suggestions on click anywhere outside this autocomplete's form.
+  document.addEventListener("click", (e) => {
+    if (formEl && !formEl.contains(e.target)) close();
+  });
+
+  return { close };
+}
+
+// Wire home-input autocomplete. onPick sets state.home directly.
+attachAutocomplete({
+  inputEl: homeInput,
+  listEl: document.getElementById("home-suggest"),
+  formEl: homeForm,
+  itemClass: "home-suggest-item",
+  onPick: ({ lat, lon, display_name }) => {
+    state.setHome({ lat, lon, displayName: display_name, approximate: false });
+  },
 });
 
 // Re-render home pin whenever state.home changes. Track previous value so
@@ -272,6 +288,22 @@ destCategories.addEventListener("change", async (e) => {
   }
 });
 
+// Helper used by both the custom-form submit handler and the autocomplete
+// pick callback. Adds a destination with a unique id and clears the input.
+function addCustomDestination({ lat, lon, name, address }) {
+  const dest = {
+    id: `custom:${Date.now()}`,
+    lat, lon,
+    name: name || address || "Destination",
+    address: address || name || "",
+    category: "custom",
+    icon: "custom",
+    approximate: false,
+  };
+  state.setDestinations([...state.getState().destinations, dest]);
+  customInput.value = "";
+}
+
 customForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const address = customInput.value.trim();
@@ -280,17 +312,7 @@ customForm.addEventListener("submit", async (e) => {
   customSubmit.disabled = true;
   try {
     const { lat, lon, display_name } = await api.geocode(address);
-    const dest = {
-      id: `custom:${Date.now()}`,
-      lat, lon,
-      name: address,
-      address: display_name,
-      category: "custom",
-      icon: "custom",
-      approximate: false,
-    };
-    state.setDestinations([...state.getState().destinations, dest]);
-    customInput.value = "";
+    addCustomDestination({ lat, lon, name: address, address: display_name });
   } catch (err) {
     if (err && err.status === 404) {
       customError.textContent = "No results for that address.";
@@ -300,6 +322,20 @@ customForm.addEventListener("submit", async (e) => {
   } finally {
     customSubmit.disabled = false;
   }
+});
+
+// Type-ahead autocomplete for the custom-destination input. Picking a
+// suggestion adds the destination immediately — no need to press the
+// "Add" button — which matches users' typical expectation for these
+// dropdowns (typing + arrow-down + Enter = one continuous flow).
+attachAutocomplete({
+  inputEl: customInput,
+  listEl: document.getElementById("custom-suggest"),
+  formEl: customForm,
+  itemClass: "custom-suggest-item",
+  onPick: ({ lat, lon, display_name }) => {
+    addCustomDestination({ lat, lon, name: display_name, address: display_name });
+  },
 });
 
 function syncCategoryCheckboxes(dests) {
