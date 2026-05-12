@@ -204,23 +204,48 @@ function removeRouteLayer(map, destId, kind) {
   routeLayers.delete(lyrId);
 }
 
+// Synchronously prune route layers for destinations that no longer exist
+// in state. Call this from a state subscriber on every state mutation so
+// dest removal takes immediate visual effect — the async fetch loop below
+// is NOT the right place because its snapshot of `dests` can be stale
+// relative to newer state, and parallel runs of renderRoutes could nuke
+// each other's layers based on those stale snapshots.
+export function pruneStaleRouteLayers(map, currentDests) {
+  const keepDestIds = new Set(currentDests.map((d) => d.id));
+  for (const lyrId of [...routeLayers]) {
+    const m = /^route-(.+)-(fast|safe)-lyr$/.exec(lyrId);
+    if (m && !keepDestIds.has(m[1])) removeRouteLayer(map, m[1], m[2]);
+  }
+}
+
+// Generation counter so a stale renderRoutes call (older than the latest
+// state mutation) doesn't tear down layers a newer call just added.
+let renderRoutesGen = 0;
+
 // Re-render all (home, dest) route pairs at the current tier.
 // `fetchRoutes` is injected so this module stays free of api.js dependency
 // during testing (and lets callers pass a stub for the fallback codepath).
+//
+// IMPORTANT: this function does NOT prune layers for missing dests anymore
+// — that lifecycle is in pruneStaleRouteLayers, called synchronously from
+// a state subscriber. Here we only ADD layers for the dests passed in.
+// Mixing the two created a race where:
+//   - Run A (older state, fewer dests) fired and started fetching.
+//   - Run B (newer state, more dests) fired before Run A's await resolved.
+//   - Whichever finished last with a failed fetch called removeRouteLayer,
+//     potentially nuking a layer the other run had just added — the user
+//     saw a route "show and then hide" on rapid multi-click.
 export async function renderRoutes(map, home, dests, tier, fetchRoutes) {
+  const myGen = ++renderRoutesGen;
+
   if (!home) {
+    // Special case: no home means no routes at all — wipe everything.
+    // Safe to do synchronously here (no parallel race possible).
     for (const lyrId of [...routeLayers]) {
       const [, destId, kind] = /^route-(.+)-(fast|safe)-lyr$/.exec(lyrId);
       removeRouteLayer(map, destId, kind);
     }
     return new Map();
-  }
-
-  // Tear down layers for destinations that no longer exist.
-  const keepDestIds = new Set(dests.map((d) => d.id));
-  for (const lyrId of [...routeLayers]) {
-    const m = /^route-(.+)-(fast|safe)-lyr$/.exec(lyrId);
-    if (m && !keepDestIds.has(m[1])) removeRouteLayer(map, m[1], m[2]);
   }
 
   const results = new Map();
@@ -231,6 +256,9 @@ export async function renderRoutes(map, home, dests, tier, fetchRoutes) {
         { lat: d.lat, lon: d.lon },
         tier,
       );
+      // If a newer renderRoutes call has superseded us, don't apply our
+      // results — the newer run is responsible for the truth now.
+      if (myGen !== renderRoutesGen) return;
       results.set(d.id, r);
       const homeLL = { lat: home.lat, lon: home.lon };
       const destLL = { lat: d.lat, lon: d.lon };
@@ -244,8 +272,13 @@ export async function renderRoutes(map, home, dests, tier, fetchRoutes) {
       if (markerEl) markerEl.classList.toggle("fallback", isFallback);
     } catch (err) {
       console.warn(`route fetch failed for ${d.id}`, err);
-      removeRouteLayer(map, d.id, "fast");
-      removeRouteLayer(map, d.id, "safe");
+      // Intentionally DO NOT remove layers on fetch error. The dest might
+      // still be in state (we just transiently failed to refresh its
+      // route — e.g., rate-limited). A parallel renderRoutes run might
+      // have just successfully added that layer; removing it here would
+      // be the "shows and then hides" race. If the dest is actually
+      // gone, pruneStaleRouteLayers will catch it on the next state
+      // change.
     }
   });
   await Promise.all(fetches);

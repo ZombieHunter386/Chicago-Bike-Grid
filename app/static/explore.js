@@ -55,6 +55,7 @@ toggleBtn.addEventListener("click", () => {
     addLayers();
     applyInitialHin();
     applyIntersectionVisibility(intersectionsCheckbox.checked);
+    applyLtsVisibility(ltsCheckbox.checked);
   });
 });
 
@@ -186,9 +187,11 @@ async function init() {
     addLayers();
     applyInitialHin();
     applyIntersectionVisibility(intersectionsCheckbox.checked);
+    applyLtsVisibility(ltsCheckbox.checked);
     document.getElementById("legend").hidden = false;
     document.getElementById("hin-toggle").hidden = false;
     document.getElementById("intersections-toggle").hidden = false;
+    document.getElementById("lts-toggle").hidden = false;
     toggleBtn.disabled = false;
     toggleBtn.textContent = "Satellite";
   } catch (err) {
@@ -223,6 +226,20 @@ function applyIntersectionVisibility(checked) {
 
 intersectionsCheckbox.addEventListener("change", () => {
   applyIntersectionVisibility(intersectionsCheckbox.checked);
+});
+
+// LTS-network-layer toggle. Defaults to "on" — the LTS streets are the
+// main /explore artifact. Lets the user untick to see ONLY the HIN
+// highlights without the LTS color noise.
+const ltsCheckbox = document.getElementById("lts-checkbox");
+
+function applyLtsVisibility(checked) {
+  if (!map.getLayer("streets-layer")) return;
+  map.setLayoutProperty("streets-layer", "visibility", checked ? "visible" : "none");
+}
+
+ltsCheckbox.addEventListener("change", () => {
+  applyLtsVisibility(ltsCheckbox.checked);
 });
 
 // HIN overlay toggle + URL permalink (?hin=1).

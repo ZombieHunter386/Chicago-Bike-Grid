@@ -11,6 +11,7 @@ import {
   renderHome,
   renderDestinations,
   renderRoutes,
+  pruneStaleRouteLayers,
   renderAvoidedIntersections,
   aggregateGaps,
   flyTo,
@@ -443,6 +444,12 @@ state.subscribe((s) => {
   renderDestinations(map, s.destinations);
   syncCategoryCheckboxes(s.destinations);
   renderDestList(s.home, s.destinations);
+  // Prune route layers SYNCHRONOUSLY for dests that no longer exist —
+  // can't wait for the async renderRoutes debounce to do this because by
+  // then a stale snapshot might un-prune a layer that newer state cares
+  // about. The async renderRoutes only ADDS layers; this prune handles
+  // all removal.
+  pruneStaleRouteLayers(map, s.destinations);
   maybeAutoFit(s);
 });
 
