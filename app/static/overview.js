@@ -82,21 +82,29 @@ const routeLayers = new Set();
 function routeSourceId(destId, kind) { return `route-${destId}-${kind}-src`; }
 function routeLayerId(destId, kind) { return `route-${destId}-${kind}-lyr`; }
 
-function lineStringFromPolyline(polyline) {
+// Build a LineString that visually starts at `home` and ends at `dest`,
+// not at the nearest-intersection vertices the routing engine snaps to.
+// Without the home/dest endpoints prepended/appended, the polyline can
+// overshoot the markers by 50-200m (whichever direction the snap pulled
+// it) and the route appears to start somewhere past the user's address.
+// Callers pass {lat, lon} for both endpoints.
+function lineStringFromPolyline(polyline, home, dest) {
+  const coords = [
+    [home.lon, home.lat],
+    ...polyline.map((p) => [p.lon, p.lat]),
+    [dest.lon, dest.lat],
+  ];
   return {
     type: "Feature",
-    geometry: {
-      type: "LineString",
-      coordinates: polyline.map((p) => [p.lon, p.lat]),
-    },
+    geometry: { type: "LineString", coordinates: coords },
     properties: {},
   };
 }
 
-function ensureRouteLayer(map, destId, kind, route) {
+function ensureRouteLayer(map, destId, kind, route, home, dest) {
   const srcId = routeSourceId(destId, kind);
   const lyrId = routeLayerId(destId, kind);
-  const geojson = lineStringFromPolyline(route.polyline);
+  const geojson = lineStringFromPolyline(route.polyline, home, dest);
 
   if (map.getSource(srcId)) {
     map.getSource(srcId).setData(geojson);
@@ -175,9 +183,11 @@ export async function renderRoutes(map, home, dests, tier, fetchRoutes) {
         tier,
       );
       results.set(d.id, r);
-      if (r.fast) ensureRouteLayer(map, d.id, "fast", r.fast);
+      const homeLL = { lat: home.lat, lon: home.lon };
+      const destLL = { lat: d.lat, lon: d.lon };
+      if (r.fast) ensureRouteLayer(map, d.id, "fast", r.fast, homeLL, destLL);
       else removeRouteLayer(map, d.id, "fast");
-      if (r.safe) ensureRouteLayer(map, d.id, "safe", r.safe);
+      if (r.safe) ensureRouteLayer(map, d.id, "safe", r.safe, homeLL, destLL);
       else removeRouteLayer(map, d.id, "safe");
       // Mark the dest marker as fallback if either route is best-effort.
       const isFallback = !!(r.safe && r.safe.is_fallback);
