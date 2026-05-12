@@ -145,11 +145,15 @@ function lineStringFromPolyline(polyline, polyline_lts, home, dest, splitByLts) 
 function ensureRouteLayer(map, destId, kind, route, home, dest) {
   const srcId = routeSourceId(destId, kind);
   const lyrId = routeLayerId(destId, kind);
-  // Safe routes get per-segment LTS coloring. Fast routes stay uniform
-  // dashed orange — they're the "ignore stress" reference line, and
-  // coloring them by LTS would muddy the safe-vs-fast comparison.
-  const splitByLts = (kind === "safe");
-  const geojson = lineStringFromPolyline(route.polyline, route.polyline_lts, home, dest, splitByLts);
+  // BOTH safe and fast routes get per-segment LTS coloring (same hue
+  // scheme as /explore). They're visually distinguished by line style:
+  //   safe → solid
+  //   fast → dashed
+  // The dashed-vs-solid signal preserves the fast/safe comparison while
+  // letting the user see how stressful each route's segments actually
+  // are. Coloring is identical across kinds so the same legend serves
+  // both.
+  const geojson = lineStringFromPolyline(route.polyline, route.polyline_lts, home, dest, true);
 
   if (map.getSource(srcId)) {
     map.getSource(srcId).setData(geojson);
@@ -157,31 +161,26 @@ function ensureRouteLayer(map, destId, kind, route, home, dest) {
     map.addSource(srcId, { type: "geojson", data: geojson });
   }
 
-  // Paint differs by kind. Fast is a single color (uniform feature, no
-  // properties to read). Safe is colored per-feature via a `match` on
-  // properties.lts — matches the /explore color scheme exactly so users
-  // have one mental model across both views.
-  let paint;
-  if (kind === "fast") {
-    paint = {
-      "line-color": "#f97316",      // var(--c-fast) — orange
-      "line-width": 4,
-      "line-dasharray": [2, 2],
-    };
-  } else {
-    paint = {
-      // Same hex values used by /explore (LTS_COLOR_EXPR in explore.js)
-      // and by the legend swatches below the tier selector.
-      "line-color": [
-        "match", ["get", "lts"],
-        1, "#16a34a",   // green — LTS 1 (safe for kid)
-        2, "#f59e0b",   // orange — LTS 2 (safe for parent)
-        3, "#dc2626",   // red — LTS 3 (not safe)
-        "#999999",      // fallback for unknown LTS values
-      ],
-      "line-width": 4,
-    };
-  }
+  const ltsColorExpr = [
+    // Same hex values used by /explore (LTS_COLOR_EXPR in explore.js)
+    // and by the legend swatches below the tier selector.
+    "match", ["get", "lts"],
+    1, "#16a34a",   // green — LTS 1 (safe for kid)
+    2, "#f59e0b",   // orange — LTS 2 (safe for parent)
+    3, "#dc2626",   // red — LTS 3 (not safe)
+    "#999999",      // fallback for unknown LTS values
+  ];
+  const paint = (kind === "fast")
+    ? {
+        "line-color": ltsColorExpr,
+        "line-width": 4,
+        "line-dasharray": [2, 2],   // dashed = fastest route
+      }
+    : {
+        "line-color": ltsColorExpr,
+        "line-width": 4,
+        // no dasharray = safe route (solid)
+      };
 
   if (map.getLayer(lyrId)) {
     map.removeLayer(lyrId);

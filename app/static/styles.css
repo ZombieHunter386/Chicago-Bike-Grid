@@ -68,6 +68,28 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 .rl-swatch.rl-lts-2 { background: #f59e0b; }
 .rl-swatch.rl-lts-3 { background: #dc2626; }
 
+/* Horizontal divider between the LTS-color rows (top) and the line-style
+   rows (bottom). Keeps the two semantic axes legible. */
+.rl-sep {
+  height: 1px; background: var(--c-border);
+  margin: 4px 0 2px;
+}
+
+/* Line-style swatches: thin grey bar styled solid vs dashed so the
+   row's visual matches the actual rendered route. Grey is intentional —
+   the legend is teaching the LINE STYLE here, not the color (which the
+   rows above already cover). */
+.rl-swatch.rl-style-solid,
+.rl-swatch.rl-style-dashed {
+  background: transparent;
+  height: 0;
+  border-top: 3px solid #4b5563;
+  width: 22px; border-radius: 0;
+}
+.rl-swatch.rl-style-dashed {
+  border-top-style: dashed;
+}
+
 #home-form {
   position: absolute; top: 72px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 4px; flex-wrap: wrap;
