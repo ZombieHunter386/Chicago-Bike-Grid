@@ -84,6 +84,7 @@ class GraphSnapshot:
     road_length_array: np.ndarray                 # shape (R,) float64
     road_on_hin_array: np.ndarray                 # shape (R,) bool
     road_highway_list: list[str | None]           # length R
+    road_name_list: list[str | None]              # length R; OSM `name` tag, surfaced by gap analysis for human-readable callouts
     road_head_int_id_array: np.ndarray            # shape (R,) int32 (PFB int_id max ~710k)
     road_tail_int_id_array: np.ndarray            # shape (R,) int32 (PFB int_id max ~710k)
     road_bbox_proj: np.ndarray                    # shape (R, 4) — minx, miny, maxx, maxy
@@ -163,7 +164,7 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     # ---- Streets → directed edges + per-road_id arrays --------------------------
     sql = """
         SELECT road_id, osm_id, head_node_osm_id, tail_node_osm_id,
-               length_m, lts, highway, on_hin, geom
+               length_m, lts, highway, name, on_hin, geom
           FROM streets
          WHERE head_node_osm_id != tail_node_osm_id
     """
@@ -180,6 +181,7 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     road_lengths: list[float] = []
     road_on_hin: list[bool] = []
     road_highways: list[str | None] = []
+    road_names: list[str | None] = []
     road_heads: list[int] = []
     road_tails: list[int] = []
     bboxes: list[tuple[float, float, float, float]] = []
@@ -196,6 +198,7 @@ def load_graph(db_path: Path) -> GraphSnapshot:
         ll = float(r["length_m"])
         rid = int(r["road_id"])
         hw = r["highway"]
+        nm = r["name"]
         on_hin = bool(r["on_hin"])
 
         # Forward + reverse directed edges.
@@ -226,6 +229,7 @@ def load_graph(db_path: Path) -> GraphSnapshot:
         road_lengths.append(ll)
         road_on_hin.append(on_hin)
         road_highways.append(hw)
+        road_names.append(nm)
         road_heads.append(h_int)
         road_tails.append(t_int)
         bboxes.append((min(xs), min(ys), max(xs), max(ys)))
@@ -295,6 +299,7 @@ def load_graph(db_path: Path) -> GraphSnapshot:
         road_length_array=np.asarray(road_lengths, dtype=np.float64),
         road_on_hin_array=np.asarray(road_on_hin, dtype=bool),
         road_highway_list=road_highways,
+        road_name_list=road_names,
         road_head_int_id_array=np.asarray(road_heads, dtype=np.int32),
         road_tail_int_id_array=np.asarray(road_tails, dtype=np.int32),
         road_bbox_proj=np.asarray(bboxes, dtype=np.float64).reshape(n_roads, 4) if n_roads else np.empty((0, 4)),

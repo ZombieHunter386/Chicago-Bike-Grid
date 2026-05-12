@@ -269,6 +269,18 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   font-size: 10px; padding: 2px 6px; border-radius: 4px;
   font-weight: 600;
 }
+/* "FIX THIS" badge: shown when upgrading this candidate would flip the
+   safe route from fallback (high-stress) to fully on-tier — the strongest
+   advocacy framing per the mockup. */
+.fp-fix-badge {
+  background: #b91c1c; color: white;
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  font-weight: 700; letter-spacing: 0.5px;
+}
+.fp-callout-unfallback {
+  border-left-color: #b91c1c;
+  background: #fef2f2;
+}
 .fp-copy-link {
   width: 100%; padding: 10px;
   background: var(--c-safe); color: white;

@@ -171,6 +171,67 @@ def divergent_bikemap_db(tmp_path: Path) -> Path:
     return db_path
 
 
+@pytest.fixture
+def fallback_divergent_bikemap_db(tmp_path: Path) -> Path:
+    """4-node graph where safe falls back AND diverges from fast at tier=kid.
+
+    Designed to exercise the post-§4.5-amendment gap-on-fallback path: every
+    route uses at least one LTS-3 edge (so safe must fall back), but the
+    fast route and the fallback safe route still pick different paths
+    because the fallback weights reward avoiding LTS-3 even when the
+    overall path is longer in metres.
+
+        v10 ──[r1: LTS 1, 60m]── v20 ──[r2: LTS 3, 60m]── v40
+         │                                                │
+         └─────────[r3: LTS 3, 100m]─────────────────────┘
+
+    All intersections lts_approach=1 (no head-LTS chokepoint).
+
+    Tier=kid (LTS-1 only):
+      Fast (length-only):          r3 direct, 100m.
+      Safe-kid main weights:       r3 INF (LTS-3), r2 INF (LTS-3) → no path.
+      Safe-kid fallback weights:   r3 cost = 100·20 = 2000;
+                                   r1+r2 cost = 60·1 + 60·20 = 1260.
+                                   r1+r2 wins; length = 120m.
+                                   safe.edge_path != fast.edge_path → diverge.
+                                   safe.is_fallback = True.
+
+    Gap candidates at tier_max_lts=1: r2 (LTS-3), r3 (LTS-3).
+      Hypothesize r2.lts=1 under MAIN weights:
+        r1+r2 both LTS-1 → 120m path. new_length=120. savings=120-120=0. Skip.
+      Hypothesize r3.lts=1 under MAIN weights:
+        r3 direct LTS-1 → 100m path. new_length=100. savings=120-100=20m.
+        flips_to_fully_safe=True.
+      Headline = r3 (road_id=203), savings≈20m, flips_to_fully_safe=True.
+    """
+    db_path = tmp_path / "bikemap.db"
+    builder = DbBuilder(db_path)
+    builder.create_schema()
+    builder.insert_intersections([
+        _intersection(10, 41.9400, -87.6800, 1),
+        _intersection(20, 41.9408, -87.6800, 1),
+        _intersection(40, 41.9408, -87.6792, 1),
+    ])
+    # ~60m vertical & horizontal hops; r3 is the diagonal ~85m... actually
+    # length is computed from haversine of geom in builder, so we hard-code
+    # by extending the geometry. Use coords where the haversine sums match.
+    builder.insert_streets([
+        # r1: v10 ↔ v20, LTS 1, short vertical
+        _seg(201, 3001, 10, 20, 1,
+             [(-87.6800, 41.9400), (-87.6800, 41.9408)]),
+        # r2: v20 ↔ v40, LTS 3, short horizontal
+        _seg(202, 3002, 20, 40, 3,
+             [(-87.6800, 41.9408), (-87.6792, 41.9408)]),
+        # r3: v10 ↔ v40, LTS 3, longer diagonal
+        _seg(203, 3003, 10, 40, 3,
+             [(-87.6800, 41.9400), (-87.6794, 41.9402), (-87.6792, 41.9408)],
+             highway="residential"),
+    ])
+    builder.record_schema_meta(code_version="test")
+    builder.close()
+    return db_path
+
+
 def _poi(name: str, category: str, lat: float, lon: float) -> PoiRecord:
     return PoiRecord(
         name=name,

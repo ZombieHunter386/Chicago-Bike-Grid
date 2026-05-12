@@ -177,18 +177,28 @@ function renderFactPanel(state, dest, result) {
 function renderHeadlineCallout(c) {
   const kindLabel = c.feature_kind === "intersection" ? "Intersection" : "Segment";
   const savings = Math.round(c.savings_m);
+  // Prefer the resolved street name; fall back to "Kind #id" only if the
+  // OSM `name` tag is missing in bikemap.db.
+  const titleText = c.name ? c.name : `${kindLabel} #${c.feature_id}`;
   const hinBadge = c.on_hin
     ? '<span class="fp-hin-badge" title="On the Cook County High-Injury Network">On HIN</span>'
     : "";
+  // Stronger advocacy framing when fixing this candidate would unfallback
+  // the route entirely (i.e., make a fully on-tier safe ride possible).
+  const unfallbackBadge = c.flips_to_fully_safe
+    ? '<span class="fp-fix-badge" title="Upgrading this would make a fully on-tier safe route possible">FIX THIS</span>'
+    : "";
+  const body = c.flips_to_fully_safe
+    ? `Upgrading this ${kindLabel.toLowerCase()} (e.g., a road diet, protected lane, or traffic-calmed approach) would make a fully on-tier safe ride to this destination possible — currently the safe route relies on high-stress segments and shaves ~${savings} m once this is fixed.`
+    : `Treating this as safer (e.g., a road diet, protected crossing, or traffic-calmed approach) shortens the safe route by ~${savings} m for this destination.`;
   return `
-    <div class="fp-callout">
+    <div class="fp-callout${c.flips_to_fully_safe ? ' fp-callout-unfallback' : ''}">
       <div class="fp-callout-head">
-        <strong>${kindLabel} #${c.feature_id}</strong>
+        <strong>${escapeHtml(titleText)}</strong>
+        ${unfallbackBadge}
         ${hinBadge}
       </div>
-      <p>Treating this as safer (e.g., a road diet, protected crossing, or
-         traffic-calmed approach) shortens the safe route by ~${savings} m
-         for this destination.</p>
+      <p>${body}</p>
     </div>
   `;
 }
