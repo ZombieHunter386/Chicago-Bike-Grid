@@ -215,6 +215,39 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   color: var(--c-marker-mid);
 }
 
+/* Inline "FIX THIS · Foster & Western" tag attached to the
+   highest-priority gap marker on the overview (mockup §2.1 case 1). */
+.gap-marker-fix-tag {
+  position: absolute;
+  left: calc(100% + 8px); top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  background: #fef2f2;
+  border: 1px solid var(--c-marker-high);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: 600 11px var(--font-stack);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
+  pointer-events: none;
+}
+.gap-marker-fix-tag.flips {
+  background: #b91c1c;
+  border-color: #7f1d1d;
+  color: white;
+}
+.gmft-heading {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  color: var(--c-marker-high);
+  margin-bottom: 2px;
+}
+.gap-marker-fix-tag.flips .gmft-heading { color: #fee2e2; }
+.gmft-street {
+  color: var(--c-text);
+  font-weight: 700;
+}
+.gap-marker-fix-tag.flips .gmft-street { color: white; }
+
 #gap-loading {
   position: absolute;
   bottom: 24px; left: 50%; transform: translateX(-50%);

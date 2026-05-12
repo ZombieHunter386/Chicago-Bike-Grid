@@ -258,13 +258,24 @@ export function aggregateGaps(perPairResults) {
         entry = {
           kind: c.feature_kind,
           id: c.feature_id,
+          // Name (from gap_analysis.py via GapCandidate.name) is the
+          // resolved OSM street name — same across all dests that route
+          // around this feature, so we just take whichever lands first.
+          name: c.name || null,
+          flips_to_fully_safe: !!c.flips_to_fully_safe,
           geometry: parseWktWgs84(c.geometry_wkt),
           on_hin: !!c.on_hin,
           affectedDestIds: new Set(),
           total_savings_meters: 0,
         };
         byKey.set(key, entry);
+      } else if (!entry.name && c.name) {
+        // Late-arriving name (shouldn't normally happen for the same key).
+        entry.name = c.name;
       }
+      // A candidate that flips ANY dest to fully-safe is worth flagging
+      // on the overview, even if other dests don't get the same flip.
+      if (c.flips_to_fully_safe) entry.flips_to_fully_safe = true;
       if (!entry.affectedDestIds.has(destId)) {
         entry.affectedDestIds.add(destId);
         entry.total_savings_meters += Number(c.savings_m) || 0;
@@ -278,6 +289,8 @@ export function aggregateGaps(perPairResults) {
     return {
       kind: e.kind,
       id: e.id,
+      name: e.name,
+      flips_to_fully_safe: e.flips_to_fully_safe,
       geometry: e.geometry,
       on_hin: e.on_hin,
       routes_affected,
@@ -330,19 +343,43 @@ export function renderAvoidedIntersections(map, aggregated) {
     }
     const el = marker.getElement();
     el.className = `gap-marker size-${a.marker_size}`;
-    el.title = `${a.kind} ${a.id} — affects ${a.routes_affected} route${a.routes_affected > 1 ? "s" : ""}, ` +
-      `~${Math.round(a.total_savings_meters)} m savings`;
+    // Prefer the resolved street name in the hover tooltip; fall back to
+    // "kind id" if name is missing (older bikemap.db without street names,
+    // or features whose OSM `name` tag is empty).
+    const label = a.name || `${a.kind} ${a.id}`;
+    const routesLabel = `${a.routes_affected} route${a.routes_affected > 1 ? "s" : ""}`;
+    el.title = `${label} — affects ${routesLabel}, ~${Math.round(a.total_savings_meters)} m savings`;
     el.innerHTML = "";
+
+    // Inner badge: count for multi-route mid, "!" for high.
     if (a.marker_size === "high") {
       const badge = document.createElement("span");
       badge.className = "gap-marker-badge";
-      badge.textContent = "!";
+      badge.textContent = a.routes_affected > 1 ? String(a.routes_affected) : "!";
       el.appendChild(badge);
     } else if (a.marker_size === "mid" && a.routes_affected > 1) {
       const badge = document.createElement("span");
       badge.className = "gap-marker-count";
       badge.textContent = String(a.routes_affected);
       el.appendChild(badge);
+    }
+
+    // Mockup-style inline "FIX THIS" label, attached to the high-priority
+    // marker only (one per overview, to keep the visual hierarchy clear).
+    // Shows the resolved street name so the advocacy ask is concrete:
+    // "Foster & Western" instead of "Intersection #12345".
+    if (a.marker_size === "high" && a.name) {
+      const tag = document.createElement("div");
+      tag.className = "gap-marker-fix-tag" + (a.flips_to_fully_safe ? " flips" : "");
+      const heading = document.createElement("div");
+      heading.className = "gmft-heading";
+      heading.textContent = a.flips_to_fully_safe ? "FIX THIS" : "BIGGEST GAP";
+      const street = document.createElement("div");
+      street.className = "gmft-street";
+      street.textContent = a.name;
+      tag.appendChild(heading);
+      tag.appendChild(street);
+      el.appendChild(tag);
     }
   }
 }
