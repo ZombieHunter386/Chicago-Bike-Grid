@@ -302,10 +302,16 @@ state.subscribe((s) => {
   maybeAutoFit(s);
 });
 
-// Initial sync from hash.
-showSidebarIfHomeSet(state.getState());
-renderDestinations(map, state.getState().destinations);
-syncCategoryCheckboxes(state.getState().destinations);
+// Initial sync from hash. loadFromHash() on line 26 fired before any
+// subscribers were registered, so the new renderDestList / maybeAutoFit
+// (subscribers above) never ran for permalink-restored state. Re-run the
+// whole render pass once here so a hash-loaded page paints correctly.
+const initialState = state.getState();
+showSidebarIfHomeSet(initialState);
+renderDestinations(map, initialState.destinations);
+syncCategoryCheckboxes(initialState.destinations);
+renderDestList(initialState.home, initialState.destinations);
+maybeAutoFit(initialState);
 
 // Routes — debounce so rapid back-to-back state mutations (toggling 3
 // categories in a row) only trigger one fetch sweep.
