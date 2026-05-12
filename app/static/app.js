@@ -203,10 +203,103 @@ function syncCategoryCheckboxes(dests) {
   }
 }
 
+// Resolved-destinations list: shows the actual name/address the app picked
+// (POI for cat:* destinations, geocoded display_name for custom:*) plus
+// straight-line distance to home and a × delete button. Without this list
+// the user has no way to see which Park/Hospital/etc. the app chose, and
+// no per-destination way to remove a custom address.
+const ICONS = {
+  school: "🏫", park: "🌳", grocery: "🛒", hospital: "🏥",
+  alderman: "🏛️", library: "📚", transit: "🚆", custom: "📍",
+};
+
+function destDistanceMi(home, d) {
+  if (!home) return null;
+  const R = 3958.8;  // miles
+  const toRad = (x) => x * Math.PI / 180;
+  const dLat = toRad(d.lat - home.lat);
+  const dLon = toRad(d.lon - home.lon);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(home.lat)) * Math.cos(toRad(d.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+const destList = document.getElementById("dest-list");
+
+function renderDestList(home, dests) {
+  if (!destList) return;
+  destList.innerHTML = "";
+  for (const d of dests) {
+    const li = document.createElement("li");
+    li.className = "dest-list-item";
+    li.dataset.destId = d.id;
+    const icon = ICONS[d.icon] || ICONS[d.category] || "📍";
+    const dist = destDistanceMi(home, d);
+    const distLabel = dist != null ? ` · ${dist.toFixed(1)} mi` : "";
+    li.innerHTML = `
+      <span class="dl-icon" aria-hidden="true">${icon}</span>
+      <span class="dl-text">
+        <span class="dl-name">${escapeHtml(d.name || d.address || "Destination")}</span>
+        <span class="dl-sub">${escapeHtml((d.address && d.address !== d.name) ? d.address : "")}${distLabel}</span>
+      </span>
+      <button class="dl-remove" type="button" aria-label="Remove ${escapeHtml(d.name || "destination")}" title="Remove">×</button>
+    `;
+    destList.appendChild(li);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[ch]));
+}
+
+destList?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".dl-remove");
+  if (!btn) return;
+  const li = btn.closest("[data-dest-id]");
+  if (!li) return;
+  const id = li.dataset.destId;
+  state.setDestinations(state.getState().destinations.filter((d) => d.id !== id));
+  // If the removed dest was a category, syncCategoryCheckboxes will untick
+  // the matching checkbox on the next state notification.
+});
+
+// Auto-fit the map to home + all destinations whenever destinations change.
+// Use a sticky "last fit signature" so we don't re-fit on every state change
+// (e.g., drilling in/out) — only when the set of dest coords actually changes.
+let lastFitSig = "";
+function maybeAutoFit(s) {
+  if (!s.home || !s.destinations.length) return;
+  const sig = `${s.home.lat},${s.home.lon}|` +
+    s.destinations.map((d) => `${d.id}:${d.lat},${d.lon}`).sort().join("|");
+  if (sig === lastFitSig) return;
+  lastFitSig = sig;
+  let minLat = s.home.lat, maxLat = s.home.lat;
+  let minLon = s.home.lon, maxLon = s.home.lon;
+  for (const d of s.destinations) {
+    if (d.lat < minLat) minLat = d.lat;
+    if (d.lat > maxLat) maxLat = d.lat;
+    if (d.lon < minLon) minLon = d.lon;
+    if (d.lon > maxLon) maxLon = d.lon;
+  }
+  if (map.isStyleLoaded()) {
+    map.fitBounds([[minLon, minLat], [maxLon, maxLat]],
+      { padding: 80, maxZoom: 14, duration: 600 });
+  } else {
+    map.once("style.load", () => map.fitBounds(
+      [[minLon, minLat], [maxLon, maxLat]],
+      { padding: 80, maxZoom: 14, duration: 600 },
+    ));
+  }
+}
+
 state.subscribe((s) => {
   showSidebarIfHomeSet(s);
   renderDestinations(map, s.destinations);
   syncCategoryCheckboxes(s.destinations);
+  renderDestList(s.home, s.destinations);
+  maybeAutoFit(s);
 });
 
 // Initial sync from hash.
