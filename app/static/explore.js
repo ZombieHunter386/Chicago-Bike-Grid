@@ -90,7 +90,16 @@ function addLayers() {
       type: "line",
       source: "hin-source",
       layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
-      paint: { "line-color": "#dc2626", "line-width": 4 },
+      // Distinct from LTS-3 (#dc2626) so HIN streets are visible as a
+      // separate signal — a street can be on the HIN OR LTS-3 OR both,
+      // and using the same red for both blended them into one indistinct
+      // line. Magenta + line-opacity 0.7 lets the underlying LTS color
+      // show through, so the user sees both axes at once.
+      paint: {
+        "line-color": "#c026d3",
+        "line-width": 5,
+        "line-opacity": 0.7,
+      },
     });
   }
 

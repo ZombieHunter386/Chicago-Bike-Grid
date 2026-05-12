@@ -532,7 +532,10 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 .swatch-lts-2 { background: #f59e0b; }
 .swatch-lts-3 { background: #dc2626; }
 .swatch-hin {
-  background: #dc2626; height: 6px;
+  /* Matches the explore.js hin-layer paint (color + opacity). Wider +
+     translucent so a HIN street visually layers on top of its underlying
+     LTS color rather than masking it. */
+  background: #c026d3; opacity: 0.7; height: 6px;
   box-shadow: 0 0 0 1px white;
 }
 
