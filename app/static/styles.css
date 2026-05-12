@@ -252,11 +252,21 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   text-align: center;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.4);
 }
-.dest-marker { position: relative; }
+/* See the comment on .gap-marker — same justification: position: absolute is
+   required to align with maplibre's .maplibregl-marker rule so the inline
+   transform tracks lng/lat. The ::after warning badge below positions itself
+   relative to this element, which still works because absolute positioning
+   creates a containing block for absolute descendants. */
+.dest-marker { position: absolute; }
 
-/* Avoided-intersection markers (Task 8). Size + color vary by aggregation rank. */
+/* Avoided-intersection markers (Task 8). Size + color vary by aggregation rank.
+   position: absolute is REQUIRED — it matches maplibre's `.maplibregl-marker`
+   rule so the inline `transform` maplibre sets on every pan/zoom translates
+   the marker from the map's origin (correctly tracking lng/lat). If this is
+   `position: relative`, the marker falls into document flow and only the
+   transform delta moves it, so the dot drifts off its intersection on pan. */
 .gap-marker {
-  position: relative;
+  position: absolute;
   border-radius: 50%;
   border: 3px solid white;
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.4);

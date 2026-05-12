@@ -385,13 +385,23 @@ export function renderAvoidedIntersections(map, aggregated) {
     let marker = gapMarkers.get(key);
     if (!marker) {
       const el = document.createElement("div");
+      // Set the className BEFORE addTo so maplibre's Marker stacks the
+      // `maplibregl-marker` class on top of ours (rather than overwriting
+      // it later — which is what `el.className = ...` would do). The
+      // `maplibregl-marker` class carries `position: absolute` + the
+      // transform origin that makes the marker track lng/lat on pan/zoom.
+      el.className = `gap-marker size-${a.marker_size}`;
       marker = new maplibregl.Marker({ element: el }).setLngLat([center.lon, center.lat]).addTo(map);
       gapMarkers.set(key, marker);
     } else {
       marker.setLngLat([center.lon, center.lat]);
     }
     const el = marker.getElement();
-    el.className = `gap-marker size-${a.marker_size}`;
+    // Update className additively so we don't strip `maplibregl-marker`
+    // when the rank changes (e.g., a high-priority marker demoted to
+    // mid on a re-render). Drop any prior size-* token first.
+    el.classList.remove("size-high", "size-mid", "size-low");
+    el.classList.add("gap-marker", `size-${a.marker_size}`);
     // Prefer the resolved street name in the hover tooltip; fall back to
     // "kind id" if name is missing (older bikemap.db without street names,
     // or features whose OSM `name` tag is empty).
