@@ -18,6 +18,14 @@ export async function geocode(address) {
   return postJson("/geocode", { address });
 }
 
+// Type-ahead suggestions (up to 5 results). Distinct from geocode()
+// because /geocode/suggest returns {results: [...]} and never 404s on
+// empty input — short queries just return an empty list.
+export async function geocodeSuggest(address) {
+  const resp = await postJson("/geocode/suggest", { address });
+  return Array.isArray(resp.results) ? resp.results : [];
+}
+
 export async function fetchRoutes(home, dest, tier) {
   return postJson("/routes", { home, dest, tier });
 }

@@ -19,8 +19,9 @@
       <button data-tier="any" type="button" class="active">Not safe <span class="lts-allowance">(LTS 1-3)</span></button>
     </div>
     <form id="home-form">
-      <input id="home-input" type="text" placeholder="Enter a location (Chicago)" autocomplete="off">
+      <input id="home-input" type="text" placeholder="Enter a location (Chicago)" autocomplete="off" role="combobox" aria-autocomplete="list" aria-controls="home-suggest" aria-expanded="false">
       <button type="submit">Set location</button>
+      <ul id="home-suggest" role="listbox" hidden></ul>
       <div id="home-error" role="alert"></div>
     </form>
     <aside id="fact-panel" aria-label="Destination detail"></aside>

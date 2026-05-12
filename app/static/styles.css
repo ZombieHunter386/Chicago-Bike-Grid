@@ -71,6 +71,30 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 }
 #home-error:empty { display: none; }
 
+/* Type-ahead suggestions dropdown under the home-input. flex-basis:100%
+   on a parent flex wrap forces the UL onto its own row directly below
+   the input row, so the list spans the full panel width regardless of
+   the Set Location button width. */
+#home-suggest {
+  flex-basis: 100%;
+  list-style: none; margin: 4px 0 0; padding: 0;
+  background: white; border: 1px solid var(--c-border);
+  border-radius: 6px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.15);
+  max-height: 260px; overflow-y: auto;
+}
+#home-suggest[hidden] { display: none; }
+.home-suggest-item {
+  padding: 8px 10px;
+  font: 13px var(--font-stack); color: var(--c-text);
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+}
+.home-suggest-item:last-child { border-bottom: none; }
+.home-suggest-item:hover,
+.home-suggest-item.selected {
+  background: #ecfdf5; color: var(--c-text);
+}
+
 .home-marker {
   width: 22px; height: 22px; border-radius: 50%;
   background: var(--c-home); border: 3px solid white;

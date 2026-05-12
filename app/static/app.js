@@ -78,6 +78,7 @@ homeForm.addEventListener("submit", async (e) => {
   try {
     const { lat, lon, display_name } = await api.geocode(address);
     state.setHome({ lat, lon, displayName: display_name, approximate: false });
+    closeSuggestions();
   } catch (err) {
     if (err && err.status === 404) {
       homeError.textContent = "No results for that address.";
@@ -89,6 +90,113 @@ homeForm.addEventListener("submit", async (e) => {
   } finally {
     homeSubmit.disabled = false;
   }
+});
+
+// ----- Home-input type-ahead autocomplete -----
+// Debounced 400ms — under Nominatim's 1 req/sec throttle and the
+// MIN_INTERVAL_S=1.1s server-side block. Latest-wins via a generation
+// counter: if the user keeps typing while a request is in flight, the
+// older request's results are discarded when the next keystroke fires.
+const homeSuggest = document.getElementById("home-suggest");
+let suggestDebounce = null;
+let suggestGen = 0;
+let selectedIdx = -1;
+
+function closeSuggestions() {
+  if (!homeSuggest) return;
+  homeSuggest.innerHTML = "";
+  homeSuggest.hidden = true;
+  homeInput.setAttribute("aria-expanded", "false");
+  selectedIdx = -1;
+}
+
+function renderSuggestions(results) {
+  if (!homeSuggest) return;
+  if (!results.length) { closeSuggestions(); return; }
+  homeSuggest.innerHTML = "";
+  for (const [i, r] of results.entries()) {
+    const li = document.createElement("li");
+    li.className = "home-suggest-item";
+    li.dataset.idx = String(i);
+    li.dataset.lat = String(r.lat);
+    li.dataset.lon = String(r.lon);
+    li.dataset.displayName = r.display_name;
+    li.setAttribute("role", "option");
+    li.textContent = r.display_name;
+    homeSuggest.appendChild(li);
+  }
+  homeSuggest.hidden = false;
+  homeInput.setAttribute("aria-expanded", "true");
+  selectedIdx = -1;
+}
+
+function applySelected(idx) {
+  const items = homeSuggest.querySelectorAll(".home-suggest-item");
+  for (const [i, el] of items.entries()) {
+    el.classList.toggle("selected", i === idx);
+  }
+  if (idx >= 0 && items[idx]) {
+    homeInput.value = items[idx].dataset.displayName;
+  }
+  selectedIdx = idx;
+}
+
+function pickSuggestion(li) {
+  const lat = parseFloat(li.dataset.lat);
+  const lon = parseFloat(li.dataset.lon);
+  const displayName = li.dataset.displayName;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  homeInput.value = displayName;
+  closeSuggestions();
+  state.setHome({ lat, lon, displayName, approximate: false });
+}
+
+homeInput.addEventListener("input", () => {
+  const q = homeInput.value.trim();
+  if (suggestDebounce) clearTimeout(suggestDebounce);
+  if (q.length < 3) { closeSuggestions(); return; }
+  const gen = ++suggestGen;
+  suggestDebounce = setTimeout(async () => {
+    try {
+      const results = await api.geocodeSuggest(q);
+      if (gen !== suggestGen) return; // newer keystroke superseded us
+      renderSuggestions(results);
+    } catch (err) {
+      // suggestions are best-effort; never surface an error here
+      if (gen === suggestGen) closeSuggestions();
+    }
+  }, 400);
+});
+
+homeInput.addEventListener("keydown", (e) => {
+  if (homeSuggest.hidden) return;
+  const items = homeSuggest.querySelectorAll(".home-suggest-item");
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    applySelected(Math.min(items.length - 1, selectedIdx + 1));
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    applySelected(Math.max(-1, selectedIdx - 1));
+  } else if (e.key === "Enter" && selectedIdx >= 0) {
+    e.preventDefault();
+    pickSuggestion(items[selectedIdx]);
+  } else if (e.key === "Escape") {
+    closeSuggestions();
+  }
+});
+
+homeSuggest.addEventListener("mousedown", (e) => {
+  // mousedown (not click) so blur on the input doesn't close the dropdown
+  // before we can read which item was clicked.
+  const li = e.target.closest(".home-suggest-item");
+  if (!li) return;
+  e.preventDefault();
+  pickSuggestion(li);
+});
+
+// Close suggestions on click anywhere outside the form.
+document.addEventListener("click", (e) => {
+  if (!homeForm.contains(e.target)) closeSuggestions();
 });
 
 // Re-render home pin whenever state.home changes. Track previous value so
