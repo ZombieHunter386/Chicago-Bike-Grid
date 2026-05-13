@@ -554,6 +554,17 @@ function scheduleGapAnalysis() {
     if (sig === gapLastDoneSig) return;
 
     gapInFlightSig = sig;
+    // Clear stale overlays from the previous trip immediately. Without this,
+    // when the user changes destinations the routes + dest marker update in
+    // ~200ms (renderRoutes) while the corridor overlay + intersection markers
+    // sit at the previous trip's geometry for the 5–30s the new gap-analysis
+    // takes — visually the new routes point one way and the red overlay still
+    // tracks the OLD streets, which reads as broken.
+    renderCorridorOverlay(map, null);
+    renderAvoidedIntersections(map, []);
+    // Also clear the cached per-pair results so drilldown re-renders don't
+    // surface stale fact-panel data mid-flight.
+    lastGapResults.clear();
     const total = s.destinations.length;
     let done = 0;
     gapLoading.hidden = false;
