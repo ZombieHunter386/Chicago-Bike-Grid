@@ -4,23 +4,20 @@
 const CHICAGO_CENTER = [-87.63, 41.88];
 const DEFAULT_ZOOM = 11;
 const STREETS_STYLE = "https://tiles.openfreemap.org/styles/liberty";
-const SATELLITE_STYLE = {
-  version: 8,
-  sources: {
-    "esri-imagery": {
-      type: "raster",
-      tiles: [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      ],
-      tileSize: 256,
-      attribution:
-        "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
-    },
-  },
-  layers: [
-    { id: "esri-imagery", type: "raster", source: "esri-imagery" },
-  ],
-};
+
+// Esri imagery raster + OFM symbol labels (street names + place names) make
+// up the satellite-with-labels hybrid. We don't use setStyle to swap to a
+// pure-raster satellite style anymore — that wipes every custom layer we
+// added (LTS streets, intersections, HIN) and the post-toggle handler then
+// has to re-add them. Mirror /index's approach: add the imagery as one more
+// layer at the bottom of the OFM style, flip visibility on toggle, hide the
+// OFM `fill` and `line` layers in satellite mode so imagery shows through,
+// keep `symbol` layers visible so street names render in both modes.
+const ESRI_IMAGERY_SRC = "esri-imagery-src";
+const ESRI_IMAGERY_LYR = "esri-imagery-lyr";
+const ESRI_IMAGERY_TILES = [
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+];
 
 const map = new maplibregl.Map({
   container: document.getElementById("map"),
@@ -30,34 +27,53 @@ const map = new maplibregl.Map({
 });
 window.__map = map;
 
+function ensureSatelliteLayer() {
+  if (map.getSource(ESRI_IMAGERY_SRC)) return;
+  map.addSource(ESRI_IMAGERY_SRC, {
+    type: "raster",
+    tiles: ESRI_IMAGERY_TILES,
+    tileSize: 256,
+    attribution:
+      "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, " +
+      "GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+  });
+  const layers = map.getStyle().layers || [];
+  const firstNonBackground = layers.find((l) => l.id !== "background");
+  map.addLayer(
+    {
+      id: ESRI_IMAGERY_LYR,
+      type: "raster",
+      source: ESRI_IMAGERY_SRC,
+      layout: { visibility: "none" },
+    },
+    firstNonBackground ? firstNonBackground.id : undefined,
+  );
+}
+
+function isOfmBasemapToHide(layer) {
+  if (!layer) return false;
+  if (layer.id === "background") return true;
+  if (layer.id === ESRI_IMAGERY_LYR) return false;
+  // Skip our custom layers — LTS streets, intersections, HIN.
+  if (layer.id === "streets-layer" || layer.id === "intersections-layer" || layer.id === "hin-layer") return false;
+  return layer.type === "fill" || layer.type === "line";
+}
+
 let basemap = "streets";
 const toggleBtn = document.getElementById("basemap-toggle");
 toggleBtn.addEventListener("click", () => {
   basemap = basemap === "streets" ? "satellite" : "streets";
-  map.setStyle(basemap === "satellite" ? SATELLITE_STYLE : STREETS_STYLE);
   toggleBtn.textContent = basemap === "streets" ? "Satellite" : "Streets";
-  // setStyle wipes all sources/layers we added (LTS streets, intersections,
-  // HIN). Re-add them once the new style is loaded. We listen to `data`
-  // events with `dataType === "style"` rather than `style.load` — the
-  // latter does NOT fire on subsequent setStyle calls in this maplibre
-  // build (confirmed via event-trace; only `data:style`, `styledata:style`,
-  // and `sourcedata:source` fire). One-shot listener: registers, fires
-  // exactly once when the style data lands, removes itself.
-  const onceStyleLoaded = (fn) => {
-    const listener = (e) => {
-      if (e.dataType !== "style") return;
-      map.off("data", listener);
-      fn();
-    };
-    map.on("data", listener);
-  };
-  onceStyleLoaded(() => {
-    addLayers();
-    applyInitialHin();
-    applyIntersectionVisibility(intersectionsCheckbox.checked);
-    applyLtsVisibility(ltsCheckbox.checked);
-  });
+  const showImagery = basemap === "satellite";
+  ensureSatelliteLayer();
+  map.setLayoutProperty(ESRI_IMAGERY_LYR, "visibility", showImagery ? "visible" : "none");
+  for (const layer of map.getStyle().layers || []) {
+    if (!isOfmBasemapToHide(layer)) continue;
+    map.setLayoutProperty(layer.id, "visibility", showImagery ? "none" : "visible");
+  }
 });
+
+map.on("load", () => ensureSatelliteLayer());
 
 // Module-scope cache so basemap toggle can re-add layers without re-fetching.
 let streetsFC = null;
