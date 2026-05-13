@@ -16,7 +16,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -91,6 +91,26 @@ def create_app(
     pois_by_category = load_pois(bikemap_db)
 
     app = Flask(__name__, static_folder="static", static_url_path="/static")
+    # Don't let the browser hold onto stale frontend assets. JS bugfixes
+    # otherwise require a hard-refresh to take effect (Flask defaults to a
+    # 12h Cache-Control on static files), which silently keeps users on
+    # broken code. The static-file bandwidth cost is negligible for this app.
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+
+    @app.after_request
+    def _no_store_static(resp):  # type: ignore[no-untyped-def]
+        # Belt + suspenders. SEND_FILE_MAX_AGE_DEFAULT=0 sets max-age=0,
+        # which still lets browsers revalidate via ETag → 304 → use cache.
+        # For frontend code we want HARD invalidation: any change should be
+        # served immediately on the next request. `no-store` + `no-cache`
+        # tells the browser to neither store the response nor reuse a
+        # cached copy without revalidating. The cost on a single-tab dev
+        # app is negligible.
+        if request.path.startswith("/static/") or request.path in ("/", "/explore"):
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+        return resp
 
     # Trust Render's reverse proxy: rewrite request.remote_addr from the first
     # X-Forwarded-For hop, and forward the original https/http scheme. Without

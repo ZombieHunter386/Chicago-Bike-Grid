@@ -113,15 +113,21 @@ function renderFactPanel(state, dest, result) {
 
   const fast = result && result.fast_route;
   const safe = result && result.safe_route;
-  const headline = result && result.headline;
+  const corridor = result && result.corridor;
+  const intersections = (result && result.intersections) || [];
   const isFallback = !!(result && result.safe_route_is_fallback);
 
   const fastLen = fast ? fast.length_m : null;
   const safeLen = safe ? safe.length_m : null;
   const detourM = fastLen != null && safeLen != null ? Math.max(0, safeLen - fastLen) : null;
 
-  const headlineHtml = headline
-    ? renderHeadlineCallout(headline)
+  const hasAdvocacy = corridor || intersections.length > 0;
+  const corridorHtml = corridor ? renderCorridorCallout(corridor) : "";
+  const intersectionsHtml = intersections.length
+    ? renderIntersectionsList(intersections)
+    : "";
+  const emptyHtml = hasAdvocacy
+    ? ""
     : '<p class="fp-empty">No notable gaps identified for this destination at the current tier.</p>';
 
   const fallbackBadge = isFallback
@@ -154,8 +160,10 @@ function renderFactPanel(state, dest, result) {
         </div>
       </div>
       <section class="fp-section">
-        <h3>Key gap</h3>
-        ${headlineHtml}
+        <h3>Advocacy ask</h3>
+        ${corridorHtml}
+        ${intersectionsHtml}
+        ${emptyHtml}
       </section>
       <section class="fp-section">
         <h3>Permalink</h3>
@@ -174,31 +182,107 @@ function renderFactPanel(state, dest, result) {
   });
 }
 
-function renderHeadlineCallout(c) {
-  const kindLabel = c.feature_kind === "intersection" ? "Intersection" : "Segment";
-  const savings = Math.round(c.savings_m);
-  // Prefer the resolved street name; fall back to "Kind #id" only if the
-  // OSM `name` tag is missing in bikemap.db.
-  const titleText = c.name ? c.name : `${kindLabel} #${c.feature_id}`;
-  const hinBadge = c.on_hin
-    ? '<span class="fp-hin-badge" title="On the Cook County High-Injury Network">On HIN</span>'
+// D' corridor callout (spec §4.5): one combined advocacy ask covering every
+// LTS-above-tier street on the fast route, with per-road marginal numbers so
+// the advocate sees which streets are load-bearing.
+function renderCorridorCallout(corridor) {
+  const totalSavings = Math.round(corridor.combined_savings_m);
+  const flips = !!corridor.flips_to_fully_safe;
+  const flipsBadge = flips
+    ? '<span class="fp-fix-badge" title="Fixing this corridor makes a fully on-tier safe route possible">FIX THIS</span>'
     : "";
-  // Stronger advocacy framing when fixing this candidate would unfallback
-  // the route entirely (i.e., make a fully on-tier safe ride possible).
-  const unfallbackBadge = c.flips_to_fully_safe
-    ? '<span class="fp-fix-badge" title="Upgrading this would make a fully on-tier safe route possible">FIX THIS</span>'
-    : "";
-  const body = c.flips_to_fully_safe
-    ? `Upgrading this ${kindLabel.toLowerCase()} (e.g., a road diet, protected lane, or traffic-calmed approach) would make a fully on-tier safe ride to this destination possible — currently the safe route relies on high-stress segments and shaves ~${savings} m once this is fixed.`
-    : `Treating this as safer (e.g., a road diet, protected crossing, or traffic-calmed approach) shortens the safe route by ~${savings} m for this destination.`;
+  const headingText = flips
+    ? `Fix this corridor to unlock a fully safe ride — saves ~${totalSavings} m`
+    : `Fix this corridor — saves ~${totalSavings} m`;
+  const roadsHtml = corridor.roads.map((r) => renderCorridorRoadRow(r, corridor.combined_savings_m)).join("");
   return `
-    <div class="fp-callout${c.flips_to_fully_safe ? ' fp-callout-unfallback' : ''}">
+    <div class="fp-callout${flips ? " fp-callout-unfallback" : ""}">
       <div class="fp-callout-head">
-        <strong>${escapeHtml(titleText)}</strong>
-        ${unfallbackBadge}
-        ${hinBadge}
+        <strong>${escapeHtml(headingText)}</strong>
+        ${flipsBadge}
       </div>
-      <p>${body}</p>
+      <ul class="fp-corridor-roads">${roadsHtml}</ul>
+    </div>
+  `;
+}
+
+// One per-road row. marginal_loss_m is "what you give up if this street is
+// dropped from the upgrade set" — the load-bearing signal for advocates.
+//
+// Edge case to be honest about: marginal_loss_m can exceed combined_savings_m
+// when dropping a road causes Dijkstra (under the partial-upgrade weights)
+// to pick a route that's actually longer than the current safe route. The
+// raw math is correct (marginal = combined - savings_without; if savings_
+// without is negative because the partial-fix path is worse, marginal goes
+// above combined). But "Drop and lose ~2701 m of the combined savings ~2507"
+// reads as broken. We clamp the displayed loss to combined and label the
+// road as "essential" — fixing this street is required to unlock ANY of
+// the corridor's savings; without it you don't get partial improvement,
+// you may end up worse than no fix.
+function renderCorridorRoadRow(road, combinedSavings) {
+  const name = road.name || `Unnamed segment ${road.road_ids[0]}`;
+  const blocks = road.block_count;
+  const blocksLabel = `${blocks} block${blocks === 1 ? "" : "s"}`;
+  const rawMarginal = Math.max(0, Math.round(road.marginal_loss_m));
+  const cappedCombined = Math.max(0, Math.round(combinedSavings));
+  const isEssential = cappedCombined > 0 && rawMarginal >= cappedCombined;
+  const marginal = Math.min(rawMarginal, cappedCombined);
+  const hinTag = road.on_hin
+    ? '<span class="fp-hin-badge" title="On the Cook County High-Injury Network">HIN</span>'
+    : "";
+  // Marginal=0 means dropping this street doesn't change the savings —
+  // optional fix, not part of the critical ask. Greyed out so it reads as
+  // "minor".
+  const minorClass = marginal === 0 ? " fp-corridor-road-minor" : "";
+  let body;
+  if (marginal === 0) {
+    body = "<em>minor — dropping has no impact</em>";
+  } else if (isEssential) {
+    body = `<strong>Essential</strong> — required for the corridor fix; drop this and you lose all ~${marginal} m of the combined savings`;
+  } else {
+    body = `Drop this and you lose ~${marginal} m of the combined savings`;
+  }
+  return `
+    <li class="fp-corridor-road${minorClass}">
+      <div class="fp-corridor-road-head">
+        <strong>${escapeHtml(name)}</strong>
+        <span class="fp-corridor-road-sub">${blocksLabel}</span>
+        ${hinTag}
+      </div>
+      <div class="fp-corridor-road-marginal">${body}</div>
+    </li>
+  `;
+}
+
+// Danger-intersections list — surfaced separately from the corridor because
+// intersections are point features without a corridor analog.
+function renderIntersectionsList(intersections) {
+  const rowsHtml = intersections.map((i) => {
+    const name = i.name || `Intersection #${i.int_id}`;
+    const savings = Math.round(i.savings_m);
+    const flipsBadge = i.flips_to_fully_safe
+      ? '<span class="fp-fix-badge" title="Fixing this alone flips the safe route to fully on-tier">FIX THIS</span>'
+      : "";
+    const hinTag = i.on_hin
+      ? '<span class="fp-hin-badge" title="On the Cook County High-Injury Network">HIN</span>'
+      : "";
+    return `
+      <li class="fp-intersection">
+        <div class="fp-intersection-head">
+          <strong>${escapeHtml(name)}</strong>
+          ${flipsBadge}
+          ${hinTag}
+        </div>
+        <div class="fp-intersection-sub">
+          Fixing this intersection shortens the safe route by ~${savings} m.
+        </div>
+      </li>
+    `;
+  }).join("");
+  return `
+    <div class="fp-intersection-block">
+      <h4 class="fp-section-sub">Danger intersections</h4>
+      <ul class="fp-intersection-list">${rowsHtml}</ul>
     </div>
   `;
 }

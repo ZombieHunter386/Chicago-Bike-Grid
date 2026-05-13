@@ -232,6 +232,71 @@ def fallback_divergent_bikemap_db(tmp_path: Path) -> Path:
     return db_path
 
 
+@pytest.fixture
+def joint_upgrade_bikemap_db(tmp_path: Path) -> Path:
+    """4-node graph where the corridor flips fallback→in-tier ONLY under a
+    JOINT segment + intersection hypothesis. Regression guard for the bug
+    where segment-pass and intersection-pass naively overwrote each other
+    and left INF on edges whose segment LTS AND head-intersection LTS both
+    needed upgrading.
+
+        v10 ──[r1: LTS-3, ~50m]── v20(chokept lts=3) ──[r2: LTS-3, ~50m]── v30
+         │                                                                  │
+         └──[r3a: LTS-3, ~5m]── v40(chokept lts=3) ──[r3b: LTS-1, ~138m]──┘
+
+    At parent tier (main: LTS-2 1.2x, LTS-3 INF; fallback: LTS-3 10x):
+      - Fast (length-only) = r1+r2 (~100m), wins over r3a+r3b (~143m).
+      - Safe main = no in-tier path: A has r1 v10→v20 max(3,3)=3 → INF;
+        B has r3a v10→v40 max(3,3)=3 → INF. Both INF.
+      - Safe fallback = r3a+r3b: r3a 5*10=50, r3b max(1,1)=1*138=138 →
+        total 188. r1+r2 fallback 50*10 + 50*10 = 1000. r3a+r3b wins.
+      - Diverge (fast=A, safe=B), safe.is_fallback = True.
+
+    Corridor on fast=r1+r2 at tier_max=2:
+      - Segments off-tier: r1, r2 (both LTS-3).
+      - Intersections off-tier on fast.vertex_path: v20 (lts_approach=3).
+      - v40 is NOT on fast and so NOT in the upgrade set.
+
+    Per-component hypothesis behavior:
+      - Segment-only {r1, r2}: r1's edge v10→v20 seg=2 (upgraded) AND head=3
+        (unchanged) → max=3 → INF. Path A main stays INF; no flip.
+      - Intersection-only {v20}: r1's edge seg=3 (unchanged), head=2
+        (upgraded) → max=3 → INF. Path A main stays INF; no flip.
+      - Joint {r1, r2} + {v20}: r1 edge seg=2, head=2 → max=2 → 1.2x main.
+        r2 edge seg=2, head=v30=1 → max=2 → 1.2x. Path A finite. Flip.
+
+    Per-fixture math is exact under haversine via the coordinates below.
+    """
+    db_path = tmp_path / "bikemap.db"
+    builder = DbBuilder(db_path)
+    builder.create_schema()
+    builder.insert_intersections([
+        _intersection(10, 41.9400, -87.6800, 1),
+        _intersection(20, 41.94045, -87.6800, 3),     # chokepoint on fast (A)
+        _intersection(30, 41.94045, -87.67940, 1),
+        _intersection(40, 41.94005, -87.6800, 3),     # chokepoint on detour (B)
+    ])
+    builder.insert_streets([
+        # r1: v10 ↔ v20, LTS-3, ~50m vertical
+        _seg(401, 5001, 10, 20, 3,
+             [(-87.6800, 41.9400), (-87.6800, 41.94045)]),
+        # r2: v20 ↔ v30, LTS-3, ~50m horizontal east
+        _seg(402, 5002, 20, 30, 3,
+             [(-87.6800, 41.94045), (-87.67940, 41.94045)]),
+        # r3a: v10 ↔ v40, LTS-3, ~5m vertical (very short — keeps B cheap under fallback)
+        _seg(403, 5003, 10, 40, 3,
+             [(-87.6800, 41.9400), (-87.6800, 41.94005)]),
+        # r3b: v40 ↔ v30, LTS-1, ~138m via a doglegged polyline so B is
+        # length-LONGER than A but fallback-CHEAPER (only its 5m r3a piece is
+        # LTS-3-weighted; the 138m here runs at LTS-1)
+        _seg(404, 5004, 40, 30, 1,
+             [(-87.6800, 41.94005), (-87.6790, 41.94005), (-87.67940, 41.94045)]),
+    ])
+    builder.record_schema_meta(code_version="test")
+    builder.close()
+    return db_path
+
+
 def _poi(name: str, category: str, lat: float, lon: float) -> PoiRecord:
     return PoiRecord(
         name=name,

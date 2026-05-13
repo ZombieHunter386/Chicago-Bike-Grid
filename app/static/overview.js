@@ -287,14 +287,43 @@ export async function renderRoutes(map, home, dests, tier, fetchRoutes) {
 
 // ----- Gap aggregation + avoided-intersection markers (Task 8, spec §4.6) ----
 
-// Parse WGS84 WKT into either {kind: "point", lat, lon} or
-// {kind: "line", coords: [[lon, lat], ...]}. Backend emits POINT for
-// intersections and LINESTRING for segments — no other geometries.
+// Parse WGS84 WKT into one of:
+//   {kind: "point", lat, lon}
+//   {kind: "line",  coords: [[lon, lat], ...]}
+//   {kind: "multiline", lines: [[[lon, lat], ...], ...]}
+// Backend emits POINT for intersections, LINESTRING (rare) or
+// MULTILINESTRING (corridor overlay + per-road geometry) for segment groups.
 export function parseWktWgs84(wkt) {
   if (!wkt) return null;
   const point = /^\s*POINT\s*\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)\s*$/i.exec(wkt);
   if (point) {
     return { kind: "point", lon: parseFloat(point[1]), lat: parseFloat(point[2]) };
+  }
+  const multi = /^\s*MULTILINESTRING\s*\(\s*(.+)\s*\)\s*$/i.exec(wkt);
+  if (multi) {
+    // Split parenthesized groups: ((a,b),(c,d)) → ["a,b", "c,d"]
+    const inner = multi[1].trim();
+    const groups = [];
+    let depth = 0, start = -1;
+    for (let i = 0; i < inner.length; i += 1) {
+      const ch = inner[i];
+      if (ch === "(") {
+        if (depth === 0) start = i + 1;
+        depth += 1;
+      } else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          groups.push(inner.slice(start, i));
+          start = -1;
+        }
+      }
+    }
+    const lines = groups.map((g) =>
+      g.split(",")
+        .map((pair) => pair.trim().split(/\s+/).map(parseFloat))
+        .filter((p) => p.length >= 2),
+    ).filter((coords) => coords.length >= 2);
+    return { kind: "multiline", lines };
   }
   const line = /^\s*LINESTRING\s*\(\s*(.+)\s*\)\s*$/i.exec(wkt);
   if (line) {
@@ -319,58 +348,86 @@ function featureCenter(geom) {
   return null;
 }
 
-// Per spec §4.6: aggregate gap candidates across all home→dest pairs.
-// Each pair's gap result contributes its headline + supporting candidates.
-// Output is sorted by descending priority; the caller bucketizes for marker
-// styling (top-1 = high, top-2/3 = mid, rest = low).
-export function aggregateGaps(perPairResults) {
-  // perPairResults: Map<destId, gapResult>
-  const byKey = new Map(); // key="kind:id" -> {kind, id, geometry, routes, savings, on_hin}
+// ----- D' aggregation (spec §4.5 corridor framing) -----
+//
+// Two separate aggregations run on the per-dest GapResult set:
+//   - aggregateCorridorOverlay: union of all corridor polylines (one map layer)
+//   - aggregateIntersections:   per-int_id aggregation, marker per intersection
+//
+// The corridor itself (combined_savings, per-road marginals, flips badge) is
+// PER-DESTINATION advocacy data — it doesn't reduce sensibly across multiple
+// destinations because each destination has its own combined hypothesis. The
+// overview shows the union of streets (visually) and the drilldown shows the
+// destination's specific corridor breakdown.
+
+// Aggregate corridor overlay geometries into one GeoJSON FeatureCollection.
+// Returns null if no destination has a corridor.
+export function aggregateCorridorOverlay(perPairResults) {
+  const features = [];
+  for (const [, result] of perPairResults) {
+    const overlay = result && result.corridor && result.corridor.fast_lts_overlay_wkt;
+    if (!overlay) continue;
+    const parsed = parseWktWgs84(overlay);
+    if (!parsed) continue;
+    if (parsed.kind === "multiline") {
+      for (const coords of parsed.lines) {
+        features.push({
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: coords },
+          properties: {},
+        });
+      }
+    } else if (parsed.kind === "line") {
+      features.push({
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: parsed.coords },
+        properties: {},
+      });
+    }
+  }
+  if (!features.length) return null;
+  return { type: "FeatureCollection", features };
+}
+
+// Aggregate danger-intersections across destinations. Same shape as the
+// pre-D' aggregation but only considers result.intersections (no segments —
+// segments live in the corridor now).
+export function aggregateIntersections(perPairResults) {
+  const byId = new Map();
 
   for (const [destId, result] of perPairResults) {
-    if (!result) continue;
-    const candidates = [];
-    if (result.headline) candidates.push(result.headline);
-    if (Array.isArray(result.supporting)) candidates.push(...result.supporting);
-
-    for (const c of candidates) {
-      const key = `${c.feature_kind}:${c.feature_id}`;
-      let entry = byKey.get(key);
+    if (!result || !Array.isArray(result.intersections)) continue;
+    for (const it of result.intersections) {
+      const key = `intersection:${it.int_id}`;
+      let entry = byId.get(key);
       if (!entry) {
         entry = {
-          kind: c.feature_kind,
-          id: c.feature_id,
-          // Name (from gap_analysis.py via GapCandidate.name) is the
-          // resolved OSM street name — same across all dests that route
-          // around this feature, so we just take whichever lands first.
-          name: c.name || null,
-          flips_to_fully_safe: !!c.flips_to_fully_safe,
-          geometry: parseWktWgs84(c.geometry_wkt),
-          on_hin: !!c.on_hin,
+          int_id: it.int_id,
+          name: it.name || null,
+          flips_to_fully_safe: !!it.flips_to_fully_safe,
+          geometry: parseWktWgs84(it.geometry_wkt),
+          on_hin: !!it.on_hin,
           affectedDestIds: new Set(),
           total_savings_meters: 0,
         };
-        byKey.set(key, entry);
-      } else if (!entry.name && c.name) {
-        // Late-arriving name (shouldn't normally happen for the same key).
-        entry.name = c.name;
+        byId.set(key, entry);
+      } else if (!entry.name && it.name) {
+        entry.name = it.name;
       }
-      // A candidate that flips ANY dest to fully-safe is worth flagging
-      // on the overview, even if other dests don't get the same flip.
-      if (c.flips_to_fully_safe) entry.flips_to_fully_safe = true;
+      if (it.flips_to_fully_safe) entry.flips_to_fully_safe = true;
       if (!entry.affectedDestIds.has(destId)) {
         entry.affectedDestIds.add(destId);
-        entry.total_savings_meters += Number(c.savings_m) || 0;
+        entry.total_savings_meters += Number(it.savings_m) || 0;
       }
     }
   }
 
-  const aggregated = Array.from(byKey.values()).map((e) => {
+  const aggregated = Array.from(byId.values()).map((e) => {
     const routes_affected = e.affectedDestIds.size;
     const priority = routes_affected * Math.log(1 + e.total_savings_meters);
     return {
-      kind: e.kind,
-      id: e.id,
+      kind: "intersection",
+      id: e.int_id,
       name: e.name,
       flips_to_fully_safe: e.flips_to_fully_safe,
       geometry: e.geometry,
@@ -383,16 +440,52 @@ export function aggregateGaps(perPairResults) {
 
   aggregated.sort((a, b) => b.priority - a.priority);
 
-  // Bucket markers by rank. Spec §4.6: hide single-route low-savings items
-  // from overview; they live in drill-down.
+  // Bucket markers by rank — same scheme as pre-D' (kept consistent so the
+  // existing renderAvoidedIntersections logic doesn't change).
   return aggregated.map((m, idx) => {
     let size = null;
     if (idx === 0) size = "high";
     else if (idx < 3) size = "mid";
     else if (m.routes_affected >= 2) size = "low";
-    else size = null; // single-route, low priority — overview-hidden
+    else size = null;
     return { ...m, rank: idx, marker_size: size };
   });
+}
+
+// Single MapLibre line layer for the corridor overlay (the polyline showing
+// every fast-route LTS-above-tier segment, across all current destinations).
+// Idempotent: passing null clears the layer.
+const CORRIDOR_OVERLAY_SRC = "corridor-overlay-src";
+const CORRIDOR_OVERLAY_LYR = "corridor-overlay-lyr";
+
+export function renderCorridorOverlay(map, geojson) {
+  if (!geojson) {
+    if (map.getLayer(CORRIDOR_OVERLAY_LYR)) map.removeLayer(CORRIDOR_OVERLAY_LYR);
+    if (map.getSource(CORRIDOR_OVERLAY_SRC)) map.removeSource(CORRIDOR_OVERLAY_SRC);
+    return;
+  }
+  if (map.getSource(CORRIDOR_OVERLAY_SRC)) {
+    map.getSource(CORRIDOR_OVERLAY_SRC).setData(geojson);
+  } else {
+    map.addSource(CORRIDOR_OVERLAY_SRC, { type: "geojson", data: geojson });
+  }
+  if (!map.getLayer(CORRIDOR_OVERLAY_LYR)) {
+    // Thick translucent red — visually distinct from the route polylines (4px)
+    // and from the HIN overlay on /explore (#c026d3 magenta). Drawn under the
+    // route layers in z-order so the dashed/solid route colors still read on
+    // top, with the corridor showing as a glow underneath.
+    map.addLayer({
+      id: CORRIDOR_OVERLAY_LYR,
+      type: "line",
+      source: CORRIDOR_OVERLAY_SRC,
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: {
+        "line-color": "#dc2626",
+        "line-width": 10,
+        "line-opacity": 0.35,
+      },
+    });
+  }
 }
 
 // MapLibre markers keyed by aggregate key ("kind:id"). Diff-rendered.

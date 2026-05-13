@@ -398,56 +398,80 @@ When the safe-route function returns no path, fallback weights from §0.1 are ap
 
 **Visual treatment**: rendered as a **dashed amber line** (distinct from solid green safe route and dashed orange fast route). A `Best effort — no fully safe path` badge attaches to the route line. The destination pin gets a small warning indicator (yellow triangle) overlaid. The drill-down fact panel for that destination explicitly explains: *"No route at your safety tier exists. The route shown uses some streets above your tier — see segments highlighted in red beneath the line for the worst stretches."* The high-stress segments along the best-effort route (those above the user's tier) are outlined in red, just as on a fast route.
 
-### 4.5 Gap analysis algorithm
+### 4.5 Gap analysis algorithm (D' corridor framing)
+
+**Status:** Replaces the original per-candidate scoring spec (2026-05-04). Original preserved in git history; see Bug 2 investigation (2026-05-12).
 
 **Inputs**: home, destination, tier, fast_route, safe_route.
 
 **Cases:**
-1. **safe_route is fallback** → no per-destination gap; flag destination "unreachable safely."
-2. **safe_route == fast_route** → no gap; "no detour."
-3. **Both exist, diverge** → run the algorithm.
+1. **fast or safe is None** → empty result (true unreachable).
+2. **safe_route.edge_path == fast_route.edge_path** → empty result (no detour).
+3. **Routes diverge** → run the corridor algorithm.
 
 **Algorithm (case 3):**
 
-1. **Define the detour zone**: the polygon enclosing both `fast_route` and `safe_route`. Compute as the convex hull of the two routes' geometries, then buffer by **200 meters** outward. This zone captures candidates that lie *between* the two routes, not just on the fast route.
-2. **Candidate set**: all edges and intersection nodes whose geometry intersects the detour zone, filtered by:
-   - `feature_lts > tier_max_lts` (i.e., currently violates user's tier), AND
-   - **Feasible-upgrade filter** — exclude features where infrastructure investment can't realistically lower LTS:
-     - `highway` not in {`motorway`, `motorway_link`, `trunk`, `trunk_link`}
-     - Not `railway`, `aerialway`, `waterway`
-     - `access` not in {`private`, `military`, `no`}
-3. **Candidate cap**: at most 100 candidates, sorted descending by `(feature_lts - tier_max_lts)` (largest violators first). Ties broken by feature length.
-4. For each candidate:
-   - For a **segment candidate**: hypothetically set its `segment_lts` to `tier_max_lts`.
-   - For an **intersection candidate**: hypothetically set its `lts_approach` to `tier_max_lts`. (Per the §4.1 max rule, this lowers the effective_lts of every edge whose head is this intersection.)
-   - Recompute safe_route on a *copy* of the graph (never mutate the shared graph in place).
-   - Record `savings = current_safe_length - new_safe_length`.
-5. Rank by savings descending. **Top 1 = headline gap.** Top 3–5 = supporting context in the drill-down fact panel.
-6. **HIN annotation**: any candidate that is also on the HIN is tagged for stronger fact-panel framing — but HIN status doesn't change ranking.
+1. **Enumerate corridor members** — features ON the fast route whose LTS is above-tier:
+   - **Segments**: unique `road_id`s where `edge_seg_lts > tier_max_lts` for any edge of fast_route.edge_path.
+   - **Intersections**: unique `int_id`s where `vertex_lts_approach > tier_max_lts` for any vertex of fast_route.vertex_path.
+   - If no off-tier members → empty result.
 
-**Why the detour-zone candidate set (vs. only "edges on fast_route"):** the real gap may be a segment neither on the fast nor current safe route — e.g., a missing connection 2 blocks east that, if upgraded, would let the safe route detour only 2 blocks instead of 4. Candidate sets restricted to the fast route would miss this case.
+2. **Combined hypothesis**: build a single hypothesized weights vector that upgrades EVERY enumerated member at once.
+   - For each segment road_id: set both directed-edge weights to `length × main_weight(tier, max(tier_max_lts, edge_head_lts))`.
+   - For each intersection int_id: set every incoming-edge weight to `length × main_weight(tier, max(edge_seg_lts, tier_max_lts))`.
+   - Run a single Dijkstra under main weights:
+     - If the resulting path has no INF-weighted edges → `new_safe_length` is the path length; `flips_to_fully_safe = safe_route.is_fallback`.
+     - Else if `safe_route.is_fallback`: retry under fallback weights with the same upgrades applied → `new_safe_length` is the fallback path length; `flips_to_fully_safe = False`.
+     - Else → no hypothesis (corridor is empty for this trip).
+   - `combined_savings_m = safe_route.length_m - new_safe_length`.
 
-**Corridor detection (post-processing):**
-- If the top-ranked candidate is adjacent (≤50m) to other top-5 candidates with savings ≥ 50% of the top, group them as a single corridor for display (e.g., *"Foster Ave between Western and Damen — 4 segments + 2 intersections"*).
-- Implemented as a simple union-find pass over geographic adjacency.
+3. **Per-road marginal contribution** (for every distinct OSM `road_name` in the segment set):
+   - Rebuild the hypothesis with this group's road_ids DROPPED from the upgrade set; keep the intersection upgrades and all other segments.
+   - Recompute via the same main-then-fallback procedure as step 2.
+   - `savings_without_m = safe_route.length_m - new_length` (or 0 if no path).
+   - `marginal_loss_m = combined_savings_m - savings_without_m`.
 
-**Performance bound:**
-- 100 candidates × A* recompute ≈ 10–30 sec per fresh query → caching mandatory (per §3.5).
+4. **Threshold for surfacing the corridor**:
+   - Surface iff `flips_to_fully_safe OR combined_savings_m > 50 m`.
+   - Below the threshold for non-flipping cases the advocacy story is too thin — surfacing it would dilute the advocacy ask.
+
+5. **Intersection scoring (separate group)** — each fast-route off-tier intersection scored independently:
+   - Same single-vertex hypothesis used pre-D' (lts_approach → tier_max_lts).
+   - Filter by `savings > 0`. Rank by `(flips_to_fully_safe, savings_m)` descending.
+   - These are the "danger intersections" — point features without a corridor analog.
+
+6. **Output**:
+   - `corridor: GapCorridor | None` — combined ask + per-road marginals + `fast_lts_overlay_wkt` (MultiLineString of all enumerated segments, rendered as the polyline overlay on the map).
+   - `intersections: list[GapIntersection]` — separately listed danger intersections.
+
+**Why combined-hypothesis over per-candidate (the change from the original spec):** in tight detour zones (e.g., Lakeview Sheffield-Halsted-Waveland), no single segment upgrade flips the safe route — every per-candidate hypothesis returns `savings = 0`. The original spec went silent in exactly the corridor cases advocates care most about. Combined-hypothesis math correctly reports "fix Sheffield + Halsted + Waveland and you save 1691 m." Per-road `marginal_loss_m` then identifies which streets are load-bearing within the ask.
+
+**Why "fast-route members only" over detour-zone candidates (also changed):** the original detour-zone enumeration included "missing connection 2 blocks east" candidates — useful in theory, confusing in practice. Restricting to features ON the fast route makes every overlay segment a literal "this is the stressful street your safe route is detouring around" — directly answering the user's "why?". The trade-off (excluding off-route connections) is acceptable given the clarity win.
+
+**HIN annotation**: each `CorridorRoad` is tagged `on_hin = True` if ANY of its blocks is on the Cook County High-Injury Network. Same for intersections. HIN status is surfaced as a badge in the fact panel but doesn't change ranking.
+
+**Performance**: combined hypothesis = 1 Dijkstra. Per-road marginals = N Dijkstras (N ≤ ~10 named streets per trip in practice, vs the prior 100-candidate Dijkstras). Net: faster than the original algorithm AND more informative.
 
 ### 4.6 Multi-route aggregation (for overview view)
 
-For the overview map's avoided-intersection markers:
+Under D' the two corridor outputs aggregate independently:
 
-1. Run gap analysis per home→destination pair.
-2. Collect every avoided feature (segment or intersection) across all pairs.
-3. Aggregate by `feature_id`:
-   - `routes_affected` = count of destinations whose gap involves this feature.
-   - `total_savings_meters` = sum of savings across affected routes.
-4. Marker prominence ranking:
-   ```
-   priority = routes_affected × log(1 + total_savings_meters)
-   ```
-   Top 1 → big red marker. Top 2–3 → smaller red. Rest → amber. Single-route low-savings avoidances → drill-down only, not on overview.
+**Corridor overlay (polyline):**
+- Union of every destination's `corridor.fast_lts_overlay_wkt` into a single FeatureCollection.
+- Rendered as one thick translucent red line layer under the per-destination route polylines. Visual emphasis on "streets to fix" without drowning out the LTS-colored route lines.
+- Cleared when no destination has a corridor.
+
+**Danger-intersection markers:**
+- Aggregate `intersections[]` by `int_id` across destinations.
+- `routes_affected` = number of destinations whose intersections list includes this id.
+- `total_savings_meters` = sum of `savings_m` across affected routes.
+- Marker prominence ranking:
+  ```
+  priority = routes_affected × log(1 + total_savings_meters)
+  ```
+  Top 1 → big red marker. Top 2–3 → smaller red. Rest → amber. Single-route low-savings → drill-down only.
+
+The corridor itself does NOT aggregate as a single "fix" object — each destination has its own combined-hypothesis math, and per-road marginals only make sense within the scope of a single trip. The overview shows the visual union (polyline) plus point-features (intersections); the drilldown shows per-destination corridor breakdown.
 
 ### 4.7 Things explicitly NOT in the routing model
 

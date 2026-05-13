@@ -46,16 +46,18 @@ def _serialize(result: GapResult, snap: GraphSnapshot) -> dict[str, Any]:
             "lts_distribution": r.lts_distribution,
         }
 
-    def _cand_dict(c) -> dict:
+    def _to_dict(c) -> dict:
         return asdict(c) if is_dataclass(c) and not isinstance(c, type) else dict(c)
 
     return {
         "fast_route": _route_dict(result.fast_route),
         "safe_route": _route_dict(result.safe_route),
         "safe_route_is_fallback": result.safe_route_is_fallback,
-        "headline": _cand_dict(result.headline) if result.headline else None,
-        "supporting": [_cand_dict(c) for c in result.supporting],
-        "corridor": [_cand_dict(c) for c in result.corridor],
+        # D' corridor framing (spec §4.5): single advocacy ask + per-road
+        # marginals + separate danger-intersection group. Frontend renders
+        # the overlay polyline from corridor.fast_lts_overlay_wkt.
+        "corridor": _to_dict(result.corridor) if result.corridor else None,
+        "intersections": [_to_dict(i) for i in result.intersections],
     }
 
 

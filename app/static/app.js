@@ -13,7 +13,9 @@ import {
   renderRoutes,
   pruneStaleRouteLayers,
   renderAvoidedIntersections,
-  aggregateGaps,
+  renderCorridorOverlay,
+  aggregateCorridorOverlay,
+  aggregateIntersections,
   flyTo,
 } from "/static/overview.js";
 import { renderDrilldown, exitDrilldown } from "/static/drilldown.js";
@@ -69,6 +71,10 @@ const homeForm = document.getElementById("home-form");
 const homeInput = document.getElementById("home-input");
 const homeError = document.getElementById("home-error");
 const homeSubmit = homeForm.querySelector("button[type=submit]");
+// Assigned below where attachAutocomplete is invoked; declared early so
+// the submit handler can close the dropdown via the autocomplete's own
+// close() method on success.
+let homeAutocomplete;
 
 homeForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -79,7 +85,7 @@ homeForm.addEventListener("submit", async (e) => {
   try {
     const { lat, lon, display_name } = await api.geocode(address);
     state.setHome({ lat, lon, displayName: display_name, approximate: false });
-    closeSuggestions();
+    homeAutocomplete?.close();
   } catch (err) {
     if (err && err.status === 404) {
       homeError.textContent = "No results for that address.";
@@ -206,7 +212,7 @@ function attachAutocomplete({ inputEl, listEl, formEl, itemClass, onPick }) {
 }
 
 // Wire home-input autocomplete. onPick sets state.home directly.
-attachAutocomplete({
+homeAutocomplete = attachAutocomplete({
   inputEl: homeInput,
   listEl: document.getElementById("home-suggest"),
   formEl: homeForm,
@@ -216,12 +222,28 @@ attachAutocomplete({
   },
 });
 
-// Re-render home pin whenever state.home changes. Track previous value so
-// we only recenter the map on the FIRST set, not on every state mutation.
+// Re-render home pin whenever state.home changes. Recenter the map when
+// the home's coordinates change — both the first set AND any subsequent
+// replacement — but NOT on unrelated state mutations (tier toggle,
+// drilldown enter/exit, destination toggle) which keep home.lat/lon
+// stable. Without the coord-change check we'd snap the camera back to
+// home every time the user interacts with anything; without firing on
+// replacement we'd silently fail to follow the user when they pick a
+// new home address (the symptom Hunter reported: "set new home and the
+// map doesn't auto-zoom").
+//
+// When destinations exist, `maybeAutoFit` further below fitBounds()'s to
+// include both home and dests — that fires synchronously after this
+// subscriber so its bounds win when there's something to fit to.
 let lastHome = null;
 state.subscribe((s) => {
   renderHome(map, s.home);
-  if (s.home && !lastHome) {
+  const homeMoved = s.home && (
+    !lastHome ||
+    s.home.lat !== lastHome.lat ||
+    s.home.lon !== lastHome.lon
+  );
+  if (homeMoved) {
     flyTo(map, s.home.lat, s.home.lon);
     homeInput.value = s.home.displayName || "";
   }
@@ -428,15 +450,12 @@ function maybeAutoFit(s) {
     if (d.lon < minLon) minLon = d.lon;
     if (d.lon > maxLon) maxLon = d.lon;
   }
-  if (map.isStyleLoaded()) {
-    map.fitBounds([[minLon, minLat], [maxLon, maxLat]],
-      { padding: 80, maxZoom: 14, duration: 600 });
-  } else {
-    map.once("style.load", () => map.fitBounds(
-      [[minLon, minLat], [maxLon, maxLat]],
-      { padding: 80, maxZoom: 14, duration: 600 },
-    ));
-  }
+  // fitBounds works whether or not the style is fully loaded; gating on
+  // isStyleLoaded() and falling back to style.load orphans the call if the
+  // user never toggles basemaps (style.load only fires on setStyle()) —
+  // same root cause as the renderRoutes regression above.
+  map.fitBounds([[minLon, minLat], [maxLon, maxLat]],
+    { padding: 80, maxZoom: 14, duration: 600 });
 }
 
 state.subscribe((s) => {
@@ -466,19 +485,24 @@ maybeAutoFit(initialState);
 
 // Routes — debounce so rapid back-to-back state mutations (toggling 3
 // categories in a row) only trigger one fetch sweep.
+//
+// We do NOT gate on `map.isStyleLoaded()` anymore. It can transiently return
+// false while tiles are streaming in (despite the style itself being loaded
+// + addLayer/addSource being callable). Previously, when that happened we
+// deferred via `map.once("style.load", ...)` — but `style.load` only fires
+// on `setStyle()` calls, so the deferred renderRoutes was orphaned if the
+// user didn't toggle basemaps. Symptom: route polylines + endpoint marker
+// rendered as the corridor overlay alone, with no fast/safe lines drawn.
+// renderRoutes is async (fetches first, then calls addLayer); by the time
+// addLayer runs the style is virtually always ready. The fallback for the
+// rare case where it isn't is a one-shot retry on the next style.load.
 let routesDebounceTimer = null;
 function scheduleRouteRender() {
   if (routesDebounceTimer) clearTimeout(routesDebounceTimer);
   routesDebounceTimer = setTimeout(() => {
     routesDebounceTimer = null;
     const s = state.getState();
-    if (map.isStyleLoaded()) {
-      renderRoutes(map, s.home, s.destinations, s.tier, api.fetchRoutes);
-    } else {
-      map.once("style.load", () => {
-        renderRoutes(map, s.home, s.destinations, s.tier, api.fetchRoutes);
-      });
-    }
+    renderRoutes(map, s.home, s.destinations, s.tier, api.fetchRoutes);
   }, 200);
 }
 
@@ -516,6 +540,7 @@ function scheduleGapAnalysis() {
     const s = state.getState();
     if (!s.home || !s.destinations.length) {
       renderAvoidedIntersections(map, []);
+      renderCorridorOverlay(map, null);
       gapLoading.hidden = true;
       gapInFlightSig = null;
       gapLastDoneSig = "@empty";
@@ -564,8 +589,8 @@ function scheduleGapAnalysis() {
 
     lastGapResults.clear();
     for (const [k, v] of perPairResults) lastGapResults.set(k, v);
-    const aggregated = aggregateGaps(perPairResults);
-    renderAvoidedIntersections(map, aggregated);
+    renderCorridorOverlay(map, aggregateCorridorOverlay(perPairResults));
+    renderAvoidedIntersections(map, aggregateIntersections(perPairResults));
     gapLoading.hidden = true;
     // Re-render drill-down if the user is already drilled in (so the
     // fact-panel headline reflects the freshly-completed gap data).

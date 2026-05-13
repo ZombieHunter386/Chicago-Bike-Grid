@@ -426,6 +426,51 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   border-left-color: #b91c1c;
   background: #fef2f2;
 }
+
+/* D' corridor advocacy: per-road list under the callout. */
+.fp-corridor-roads {
+  list-style: none; margin: 8px 0 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.fp-corridor-road {
+  background: white; border: 1px solid #e2e8f0;
+  border-radius: 4px; padding: 8px 10px;
+}
+.fp-corridor-road-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px;
+}
+.fp-corridor-road-sub {
+  color: var(--c-text-muted); font-size: 11px;
+}
+.fp-corridor-road-marginal {
+  margin-top: 3px; font-size: 11px; color: var(--c-text-muted);
+}
+.fp-corridor-road-minor {
+  opacity: 0.55;
+}
+.fp-corridor-road-minor .fp-corridor-road-marginal em { font-style: normal; }
+
+/* Danger-intersections section under the corridor callout. */
+.fp-intersection-block { margin-top: 12px; }
+.fp-section-sub {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--c-text-muted);
+  margin: 0 0 6px 0;
+}
+.fp-intersection-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.fp-intersection {
+  background: #f8fafc; border-left: 3px solid var(--c-stress);
+  padding: 8px 10px; border-radius: 0 4px 4px 0;
+}
+.fp-intersection-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; margin-bottom: 3px;
+}
+.fp-intersection-sub { font-size: 11px; color: var(--c-text-muted); }
 .fp-copy-link {
   width: 100%; padding: 10px;
   background: var(--c-safe); color: white;

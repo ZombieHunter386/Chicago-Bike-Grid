@@ -1,213 +1,181 @@
-"""Tests for app.core.gap_analysis. Uses divergent_bikemap_db fixture
-which is specifically designed to force fast/safe divergence at 'parent'
-tier (Fix 5)."""
+"""Tests for app.core.gap_analysis (D' corridor framing).
+
+The spec §4.5 algorithm computes a CORRIDOR-level advocacy ask: the set of
+LTS-above-tier segments and intersections on the fast route, scored as a
+single combined hypothesis. Per-road marginal contributions identify which
+streets are load-bearing.
+
+See gap_analysis.py module docstring for the algorithm.
+"""
 from pathlib import Path
 
-from app.core.gap_analysis import GapResult, analyze_gap
+from app.core.gap_analysis import (
+    CORRIDOR_SAVINGS_FLOOR_M,
+    GapResult,
+    analyze_gap,
+)
 from app.core.graph import load_graph, vertex_for_int_id
 
 
-def test_gap_no_diverge_yields_empty_headline(divergent_bikemap_db: Path) -> None:
-    """At 'kid' tier, the LTS-3 direct edge is blocked AND the LTS-1 detour
-    works: fast route uses direct (length-only), safe route uses detour.
-    They diverge — but if 'kid' tier here the safe route is feasible, gap
-    analysis runs. If we instead pick a route where safe == fast, headline
-    is None. Use src=dst as the simplest no-diverge case (path length 0)."""
+def test_gap_no_detour_returns_empty(divergent_bikemap_db: Path) -> None:
+    """src == dst: trivial routes coincide, no corridor."""
     snap = load_graph(divergent_bikemap_db)
     v10 = vertex_for_int_id(snap, 10)
     assert v10 is not None
     res = analyze_gap(snap, v10, v10, "any")
     assert isinstance(res, GapResult)
-    assert res.headline is None
+    assert res.corridor is None
+    assert res.intersections == ()
 
 
-def test_gap_parent_tier_finds_lts3_segment_as_headline(
+def test_gap_parent_tier_corridor_with_combined_savings(
     divergent_bikemap_db: Path,
 ) -> None:
-    """At parent tier (LTS 1-2 allowed), v100 → v400 fast = r3 (LTS 3, 200m);
-    safe = r1 + r2 (LTS 1, 300m). Hypothetically downgrading r3 to LTS 2
-    gives a 200m route — savings 100m. r3 must be the headline candidate."""
+    """At parent tier on v100→v400 (divergent fixture):
+      fast = r3 (LTS-3 direct); safe = r1+r2 (LTS-1 detour, NOT fallback).
+    Combined hypothesis upgrades r3 alone (only LTS>2 on fast). r3 weight
+    drops from INF to len×1.2, beating the detour's len×1.0+len×1.0; safe
+    flips to r3 → savings = safe_length - fast_length.
+    flips_to_fully_safe=False (safe wasn't fallback to begin with).
+    Corridor has exactly one road, marginal_loss == combined_savings."""
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
     assert v100 is not None and v400 is not None
     res = analyze_gap(snap, v100, v400, "parent")
     assert res.safe_route_is_fallback is False
-    assert res.headline is not None
-    assert res.headline.feature_kind == "segment"
-    assert res.headline.feature_id == 103   # r3's road_id
-    assert res.headline.current_lts == 3
-    assert res.headline.savings_m > 50      # ~100m savings; allow slop
+    assert res.corridor is not None
+    expected = res.safe_route.length_m - res.fast_route.length_m
+    assert abs(res.corridor.combined_savings_m - expected) < 1.0
+    assert res.corridor.flips_to_fully_safe is False
+    assert len(res.corridor.roads) == 1
+    road = res.corridor.roads[0]
+    assert road.name == "Test St 103"
+    assert road.block_count == 1
+    # Only road in the corridor → its marginal_loss equals combined_savings.
+    assert abs(road.marginal_loss_m - res.corridor.combined_savings_m) < 1.0
 
 
-def test_gap_kid_tier_no_chokepoint_returns_in_tier_diverge(
+def test_gap_corridor_overlay_geometry_is_multilinestring(
     divergent_bikemap_db: Path,
 ) -> None:
-    """At 'kid' tier: r3 (LTS 3) blocked, but r1+r2 (LTS 1) is in-tier.
-    fast = r3 (length-only), safe = r1+r2. Diverge → r3 headline.
-    Same shape as parent-tier but tighter tier — verifies the algorithm
-    handles 'kid' identically when the detour exists."""
+    """`fast_lts_overlay_wkt` is a MultiLineString of fast-route off-tier
+    segments — the polyline overlay the frontend renders on the map."""
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
-    assert v100 is not None and v400 is not None
-    res = analyze_gap(snap, v100, v400, "kid")
-    assert res.safe_route_is_fallback is False
-    assert res.headline is not None
-    assert res.headline.feature_id == 103   # r3 again
+    res = analyze_gap(snap, v100, v400, "parent")
+    assert res.corridor is not None
+    assert res.corridor.fast_lts_overlay_wkt.startswith("MULTILINESTRING")
 
 
-def test_gap_runs_on_fallback_safe_route_and_returns_headline(
+def test_gap_road_geometry_is_multilinestring(
+    divergent_bikemap_db: Path,
+) -> None:
+    """Per-road `geometry_wkt` is also a MultiLineString (one block here,
+    but the shape is consistent so the frontend has one render path)."""
+    snap = load_graph(divergent_bikemap_db)
+    v100 = vertex_for_int_id(snap, 10)
+    v400 = vertex_for_int_id(snap, 40)
+    res = analyze_gap(snap, v100, v400, "parent")
+    assert res.corridor is not None
+    assert res.corridor.roads[0].geometry_wkt.startswith("MULTILINESTRING")
+
+
+def test_gap_kid_tier_corridor_flips_fallback_to_in_tier(
     fallback_divergent_bikemap_db: Path,
 ) -> None:
-    """When safe route is fallback (no fully on-tier path exists) AND the
-    fallback safe route diverges from fast, gap analysis MUST still run
-    and surface the candidate whose upgrade would unfallback the route.
-
-    Replaces the prior 'fallback → no headline' contract — that was a
-    launch-blocker for §6.4 #5: no realistic Chicago trip at tier=parent
-    ever produced a gap callout, so the advocacy artifact was mute on
-    exactly the trips that needed it most.
-
-    Setup (see fixture docstring): tier=kid forces fallback; r3 (LTS-3
-    diagonal) is the fast route; r1+r2 (LTS-1 + LTS-3) is the fallback
-    safe route. Hypothesizing r3.lts=1 lets safe pick r3 directly under
-    main weights — savings ≈ 20m AND the route is no longer fallback.
-    """
+    """fallback_divergent fixture at kid tier:
+      fast = r3 (LTS-3, ~100m); safe = fallback r1+r2 (LTS-1+LTS-3, ~120m).
+    Combined hypothesis upgrades r3 (only LTS>1 on fast — r2 isn't on fast):
+      r3 weight 100×1.0=100, in-tier path now exists → safe flips to r3.
+      savings ≈ 20m, flips_to_fully_safe = True.
+    Threshold: 20m alone is below floor BUT flips=True surfaces the corridor."""
     snap = load_graph(fallback_divergent_bikemap_db)
     v10 = vertex_for_int_id(snap, 10)
     v40 = vertex_for_int_id(snap, 40)
     assert v10 is not None and v40 is not None
     res = analyze_gap(snap, v10, v40, "kid")
     assert res.safe_route_is_fallback is True
-    assert res.headline is not None, (
-        "fallback safe route with a divergent fast route must surface a "
-        "gap candidate per the §6.4 #5 launch criterion"
+    assert res.corridor is not None, (
+        "fallback safe + divergent fast must surface a corridor; flips_to_"
+        "fully_safe lets the corridor surface even when savings < floor"
     )
-    assert res.headline.savings_m > 0
-    # r3 (road_id=203) is the only candidate whose hypothesis flips the
-    # route from fallback to in-tier; it should win the top slot.
-    assert res.headline.feature_id == 203
-    assert res.headline.flips_to_fully_safe is True
+    assert res.corridor.flips_to_fully_safe is True
+    assert res.corridor.combined_savings_m < CORRIDOR_SAVINGS_FLOOR_M
+    # The corridor's road is r3 (road_id=203, name 'Test St 203').
+    assert len(res.corridor.roads) == 1
+    assert res.corridor.roads[0].road_ids == (203,)
+    assert res.corridor.roads[0].name == "Test St 203"
 
 
-def test_gap_fallback_with_coincident_fast_and_safe_returns_no_headline(
-    tiny_bikemap_db: Path,
+def test_gap_intersections_separated_from_corridor(
+    divergent_bikemap_db: Path,
 ) -> None:
-    """When safe is fallback BUT happens to pick the same edge_path as
-    fast (no actual detour), there's nothing to analyze — return empty.
-
-    tiny_bikemap_db at tier=kid v100→v500: r5 direct (LTS-3, ~693m) wins
-    both length-only (fast) and fallback (cost = 693*20 = 13860 vs the
-    r1+r4 detour cost 554*1 + 554*20 = 11634... actually detour wins
-    cost-wise. Update: if they coincide here it's because the detour
-    crosses v300 with lts_approach=3 — head_lts max-rule makes r1's
-    directed edge into v300 effectively LTS-3, so both legs of the
-    detour are LTS-3 under fallback weights, leaving r5 marginally
-    shorter under fallback cost. In any case: the test asserts the
-    "fast == safe under fallback" coincidence case correctly produces
-    headline=None.
-    """
-    snap = load_graph(tiny_bikemap_db)
-    v100 = vertex_for_int_id(snap, 100)
-    v500 = vertex_for_int_id(snap, 500)
-    assert v100 is not None and v500 is not None
-    res = analyze_gap(snap, v100, v500, "kid")
-    # Either fast == safe (single LTS-3 edge) and we get no headline, or
-    # the routes diverge (detour wins) and we get one. Both are valid
-    # algorithm behaviour given the fixture geometry, but tightly couple
-    # the test to the coincident case — that's the one we care about
-    # asserting since the prior contract was "fallback always = no
-    # headline" and we want to be sure the coincidence branch still works.
-    fast = res.fast_route
-    safe = res.safe_route
-    if fast is not None and safe is not None and fast.edge_path == safe.edge_path:
-        assert res.headline is None
+    """divergent fixture has no off-tier intersections (all lts_approach=1).
+    The intersections list is therefore empty even though the corridor
+    has segment members. Segments and intersections are separate groups."""
+    snap = load_graph(divergent_bikemap_db)
+    v100 = vertex_for_int_id(snap, 10)
+    v400 = vertex_for_int_id(snap, 40)
+    res = analyze_gap(snap, v100, v400, "parent")
+    assert res.corridor is not None
+    assert res.intersections == ()
 
 
-def test_gap_returns_no_headline_when_truly_unreachable(
-    tiny_bikemap_db: Path,
-) -> None:
-    """If neither fast nor safe route exists (genuinely disconnected),
-    gap analysis returns headline=None. This is the spec §4.5 case 1
-    after the amendment: 'no path at all', not 'safe is fallback'."""
+def test_gap_empty_when_fast_equals_safe(tiny_bikemap_db: Path) -> None:
+    """When fast.edge_path == safe.edge_path (no detour), corridor=None.
+    Use src==dst as the simplest no-detour case."""
     snap = load_graph(tiny_bikemap_db)
     v100 = vertex_for_int_id(snap, 100)
     assert v100 is not None
-    # src == dst is the trivial unreachable-but-no-detour case; both routes
-    # are zero-length trivial routes, fast.edge_path == safe.edge_path → no
-    # detour → no headline.
     res = analyze_gap(snap, v100, v100, "kid")
-    assert res.headline is None
+    assert res.corridor is None
+    assert res.intersections == ()
 
 
-def test_gap_headline_carries_street_name(
-    divergent_bikemap_db: Path,
+def test_gap_joint_segment_and_intersection_upgrade_flips_fallback(
+    joint_upgrade_bikemap_db: Path,
 ) -> None:
-    """GapCandidate.name must be populated for frontend display.
+    """Regression guard for the joint-upgrade bug. The fixture is constructed
+    so the corridor flips fallback→in-tier ONLY when segments and intersections
+    are upgraded together — segment-only or intersection-only leaves the
+    relevant edge at INF because the un-upgraded component still drives the
+    max-rule effective LTS to 3.
 
-    The conftest fixtures use _seg(road_id=N) which sets name='Test St N'.
-    Headline candidate must surface that name so the drilldown shows
-    'Test St 103' instead of 'Segment #103'.
+    Before the joint-pass fix, _apply_segment_upgrades and
+    _apply_intersection_upgrades wrote sequentially to the weights array,
+    each reading the OTHER component's pre-upgrade value via the max rule —
+    so both ended up writing INF for the shared edge and flips_to_fully_safe
+    stayed False. The combined helper now computes
+    max(seg_eff, head_eff) where each component is tier_max_lts iff in the
+    upgrade set.
     """
-    snap = load_graph(divergent_bikemap_db)
-    v100 = vertex_for_int_id(snap, 10)
-    v400 = vertex_for_int_id(snap, 40)
-    assert v100 is not None and v400 is not None
-    res = analyze_gap(snap, v100, v400, "parent")
-    assert res.headline is not None
-    assert res.headline.name == "Test St 103"
+    snap = load_graph(joint_upgrade_bikemap_db)
+    v10 = vertex_for_int_id(snap, 10)
+    v30 = vertex_for_int_id(snap, 30)
+    assert v10 is not None and v30 is not None
+    res = analyze_gap(snap, v10, v30, "parent")
+    assert res.safe_route_is_fallback is True, (
+        "fixture expectation: every path from v10→v30 crosses an LTS-3 head "
+        "intersection → safe falls back"
+    )
+    assert res.corridor is not None
+    # The joint upgrade of r1 + v20 flips the route to in-tier — combined
+    # savings > 0 AND flips_to_fully_safe is True. This is the assertion that
+    # would fail under the pre-fix segment-pass-then-intersection-pass code.
+    assert res.corridor.flips_to_fully_safe is True
+    assert res.corridor.combined_savings_m > 0
 
 
-def test_gap_tier_any_now_surfaces_lts3_candidates(
+def test_gap_roads_sorted_by_marginal_loss_descending(
     divergent_bikemap_db: Path,
 ) -> None:
-    """Previous _TIER_MAX_LTS['any']=3 made the candidate filter `lts > 3`
-    always-false → 0 candidates surfaced at tier=any across all 30 long-
-    distance trips in the §6.4 #5 sweep. Now tier_max_lts['any']=2 so
-    LTS-3 segments are candidates: hypothesizing them at LTS-2 shortens
-    the tier=any safe route (1.5x penalty → 1.2x penalty)."""
+    """Corridor.roads invariant: sorted by marginal_loss_m descending."""
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
-    assert v100 is not None and v400 is not None
-    res = analyze_gap(snap, v100, v400, "any")
-    # At tier=any the safe route may equal fast (both length-equivalent at
-    # 1.5x penalty vs 1.0x). If they happen to coincide, no candidate is
-    # expected. But if they diverge, headline MUST surface the LTS-3 segment.
-    if res.headline is not None:
-        assert res.headline.current_lts == 3
-
-
-def test_gap_supporting_and_corridor_are_lists(
-    divergent_bikemap_db: Path,
-) -> None:
-    """GapResult shape: supporting and corridor are lists (possibly empty)."""
-    snap = load_graph(divergent_bikemap_db)
-    v100 = vertex_for_int_id(snap, 10)
-    v400 = vertex_for_int_id(snap, 40)
-    assert v100 is not None and v400 is not None
     res = analyze_gap(snap, v100, v400, "parent")
-    assert isinstance(res.supporting, list)
-    assert isinstance(res.corridor, list)
-
-
-def test_gap_candidate_sort_combines_segments_and_intersections(
-    divergent_bikemap_db: Path,
-) -> None:
-    """Fix 2 regression guard: when both segment and intersection candidates
-    exist with different violation levels, the higher-violation one wins
-    regardless of feature kind. divergent_bikemap_db has only segment
-    candidates (all intersections have lts_approach=1) — this test simply
-    asserts the candidate list is sorted by violation level descending."""
-    snap = load_graph(divergent_bikemap_db)
-    v100 = vertex_for_int_id(snap, 10)
-    v400 = vertex_for_int_id(snap, 40)
-    assert v100 is not None and v400 is not None
-    res = analyze_gap(snap, v100, v400, "parent")
-    if res.headline is not None and res.supporting:
-        prev_violation = res.headline.current_lts
-        for c in res.supporting:
-            # Each subsequent candidate has equal-or-lower violation.
-            assert c.current_lts <= prev_violation
-            prev_violation = c.current_lts
+    assert res.corridor is not None
+    losses = [r.marginal_loss_m for r in res.corridor.roads]
+    assert losses == sorted(losses, reverse=True)
