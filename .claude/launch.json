@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "chicago-bike-grid",
+      "runtimeExecutable": "make",
+      "runtimeArgs": ["dev"],
+      "port": 8000
+    }
+  ]
+}
