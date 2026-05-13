@@ -44,8 +44,25 @@ export async function fetchTreatment(slug) {
 // Submit gap-analysis. If cache hit → {status: "ready", result}. If miss →
 // {status: "running", job_id}; we then poll /gap-analysis/status every
 // 1500ms until status="ready" or "error", capped at 60s (40 polls).
+//
+// Transparent retry on 429: the backend's rolling 60/min window can briefly
+// reject bursts (rapid tier toggle, multi-dest add). Rather than fail the
+// dest entirely, wait long enough for the window to free up and retry once.
+// If still rate-limited, propagate the 429 so the UI surfaces it.
 export async function fetchGapAnalysis(home, dest, tier) {
-  const submit = await postJson("/gap-analysis", { home, dest, tier });
+  let submit;
+  try {
+    submit = await postJson("/gap-analysis", { home, dest, tier });
+  } catch (err) {
+    if (err && err.status === 429) {
+      // 6s is enough to age out the oldest request in a tight burst. Cheaper
+      // than 60s + a slot opens as soon as one prior request rolls off.
+      await new Promise((r) => setTimeout(r, 6000));
+      submit = await postJson("/gap-analysis", { home, dest, tier });
+    } else {
+      throw err;
+    }
+  }
   if (submit.status === "ready") return submit.result;
   if (submit.status !== "running") throw { status: 500, body: submit };
 

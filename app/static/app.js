@@ -563,6 +563,7 @@ function scheduleGapAnalysis() {
     const tier = s.tier;
     const perPairResults = new Map();
 
+    const failures = [];
     await Promise.all(
       s.destinations.map(async (d) => {
         try {
@@ -570,6 +571,7 @@ function scheduleGapAnalysis() {
           perPairResults.set(d.id, r);
         } catch (err) {
           console.warn(`gap-analysis failed for ${d.id}`, err);
+          failures.push({ destId: d.id, status: err && err.status });
         } finally {
           done += 1;
           if (sig === gapInFlightSig) {
@@ -579,6 +581,27 @@ function scheduleGapAnalysis() {
         }
       }),
     );
+
+    // Surface gap-analysis failures so users don't silently see an empty
+    // corridor and assume the tool is broken. The most common failure is
+    // 429 (rate-limited by Flask-Limiter at 60/min); we differentiate so
+    // the user knows whether to wait and retry vs. report a bug.
+    if (failures.length > 0 && sig === gapInFlightSig) {
+      const rateLimited = failures.some((f) => f.status === 429);
+      const otherErr = failures.some((f) => f.status !== 429);
+      let msg;
+      if (rateLimited && !otherErr) {
+        msg = `Rate-limited (60 requests per minute). Wait ~30s and change something to retry.`;
+      } else if (rateLimited && otherErr) {
+        msg = `Some destinations rate-limited, others errored. Wait ~30s and change a setting to retry.`;
+      } else {
+        msg = `Gap analysis failed for ${failures.length} of ${total} destinations. Try again.`;
+      }
+      gapLoadingText.textContent = msg;
+      // Keep the banner visible so users see it instead of the silent
+      // "all done" disappear-trick the previous code did.
+      setTimeout(() => { if (gapLoading) gapLoading.hidden = true; }, 8000);
+    }
 
     // Bail if a newer run took over while we were in flight. Otherwise
     // commit results, mark this signature done so a no-op re-trigger

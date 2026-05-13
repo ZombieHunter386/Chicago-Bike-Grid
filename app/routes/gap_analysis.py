@@ -93,7 +93,15 @@ def build_gap_analysis_blueprint(
         return payload
 
     @bp.post("/gap-analysis")
-    @limiter.limit("10 per minute")
+    # 60/min matches the global default and accommodates normal interactive
+    # use: a fresh map with N destinations fires N requests, and any state
+    # change (tier toggle, dest add/remove, home change) refires per
+    # destination. The old 10/min ceiling was easy to hit silently —
+    # frontend would catch the 429 with only a console.warn, leaving the
+    # corridor overlay blank with no user-visible explanation. Cache hits
+    # (the common case after warmup) still count against the limit, but
+    # 60/min covers anyone using the tool reasonably.
+    @limiter.limit("60 per minute")
     def submit():
         body = request.get_json(silent=True) or {}
         home = body.get("home") or {}
