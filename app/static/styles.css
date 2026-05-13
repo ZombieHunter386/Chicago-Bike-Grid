@@ -584,21 +584,26 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   box-shadow: 0 0 0 1px white;
 }
 
+/* Top-right toggle row on /explore. Flex layout (rather than fixed `right:`
+   offsets per toggle) keeps the toggles from overlapping each other —
+   "Show High-Injury Network overlay" is ~280px wide, which used to clip
+   under the adjacent "Show intersections" toggle when each was positioned
+   independently. */
+#explore-toggles {
+  position: absolute; top: 12px; right: 200px;
+  display: flex; gap: 8px; align-items: center;
+}
 #hin-toggle,
 #intersections-toggle,
 #lts-toggle {
-  position: absolute; top: 12px;
   background: var(--c-bg); border: 1px solid var(--c-border);
   border-radius: var(--radius-panel); box-shadow: var(--shadow-panel);
   padding: 8px 12px;
   font: 14px var(--font-stack); color: var(--c-text);
   display: flex; align-items: center; gap: 6px;
   cursor: pointer;
+  white-space: nowrap;
 }
-#hin-toggle { right: 200px; }
-/* Stack the toggles to the left of the HIN toggle. */
-#intersections-toggle { right: 440px; }
-#lts-toggle { right: 600px; }
 #hin-toggle[hidden],
 #intersections-toggle[hidden],
 #lts-toggle[hidden] { display: none; }

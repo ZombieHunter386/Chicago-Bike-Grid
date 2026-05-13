@@ -73,7 +73,10 @@ toggleBtn.addEventListener("click", () => {
   }
 });
 
-map.on("load", () => ensureSatelliteLayer());
+// `ensureSatelliteLayer` is called lazily inside the toggle handler — not
+// on map load — so streets-mode users never trigger an Esri raster source
+// load. Eager init added latency to the initial style processing even when
+// the imagery layer was hidden.
 
 // Module-scope cache so basemap toggle can re-add layers without re-fetching.
 let streetsFC = null;

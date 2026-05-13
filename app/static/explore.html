@@ -19,15 +19,17 @@
       <div class="legend-row"><span class="legend-swatch swatch-lts-3"></span> LTS 3 — Not safe</div>
       <div class="legend-row"><span class="legend-swatch swatch-hin"></span> High-Injury Network</div>
     </div>
-    <label id="hin-toggle" hidden>
-      <input type="checkbox" id="hin-checkbox"> Show High-Injury Network overlay
-    </label>
-    <label id="intersections-toggle" hidden>
-      <input type="checkbox" id="intersections-checkbox" checked> Show intersections
-    </label>
-    <label id="lts-toggle" hidden>
-      <input type="checkbox" id="lts-checkbox" checked> Show LTS network
-    </label>
+    <div id="explore-toggles">
+      <label id="lts-toggle" hidden>
+        <input type="checkbox" id="lts-checkbox" checked> Show LTS network
+      </label>
+      <label id="intersections-toggle" hidden>
+        <input type="checkbox" id="intersections-checkbox" checked> Show intersections
+      </label>
+      <label id="hin-toggle" hidden>
+        <input type="checkbox" id="hin-checkbox"> Show High-Injury Network overlay
+      </label>
+    </div>
     <div id="explore-error" hidden role="alert">
       <p class="ee-text">Couldn't load the LTS network.</p>
       <button class="ee-retry" type="button">Retry</button>

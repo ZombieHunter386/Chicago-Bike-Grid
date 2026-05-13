@@ -37,10 +37,13 @@ window.__map = map;
 
 let basemap = "streets";
 const toggleBtn = document.getElementById("basemap-toggle");
-// Add the Esri imagery layer once at the bottom of the style, hidden by
-// default. Toggling no longer setStyle()s — it flips visibility flags —
-// so routes/corridor/markers persist across mode switches.
-map.on("load", () => ensureSatelliteLayer(map));
+// Satellite layer is loaded LAZILY on the first toggle, not on initial map
+// load. `setBasemap` calls `ensureSatelliteLayer` internally and is
+// idempotent. Eager load (previous: `map.on("load", () => ensureSatelliteLayer)`)
+// added the Esri raster source up-front; even with visibility=none the
+// source enters MapLibre's style processing and adds noticeable latency to
+// the initial map render. With lazy load: streets-mode users never touch
+// the Esri CDN at all.
 toggleBtn.addEventListener("click", () => {
   basemap = basemap === "streets" ? "satellite" : "streets";
   setBasemap(map, basemap);
