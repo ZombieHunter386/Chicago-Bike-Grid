@@ -26,8 +26,19 @@ function findDest(state, destId) {
 }
 
 function visibleDestIds(state) {
-  const drilled = state.drilledPair && state.drilledPair.destId;
-  return drilled ? new Set([drilled]) : new Set(state.destinations.map((d) => d.id));
+  // If the drilled destId no longer matches any current destination (e.g.,
+  // the user swapped to a different dest while a stale drilledPair from a
+  // prior session/click lingered in state), treat the user as un-drilled —
+  // showing all current dests' routes — rather than hiding everything.
+  // Pre-fix, this case made every route layer get visibility=none, which
+  // looked like "the app forgot how to draw routes after I picked a new
+  // place to go."
+  const drilledId = state.drilledPair && state.drilledPair.destId;
+  const allIds = state.destinations.map((d) => d.id);
+  if (drilledId && allIds.includes(drilledId)) {
+    return new Set([drilledId]);
+  }
+  return new Set(allIds);
 }
 
 // Set visibility on route layers + dest markers based on drilled state.

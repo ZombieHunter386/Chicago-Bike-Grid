@@ -7,23 +7,11 @@ const DEFAULT_ZOOM = 11;
 
 const STREETS_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 
-const SATELLITE_STYLE = {
-  version: 8,
-  sources: {
-    "esri-imagery": {
-      type: "raster",
-      tiles: [
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      ],
-      tileSize: 256,
-      attribution:
-        "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
-    },
-  },
-  layers: [
-    { id: "esri-imagery", type: "raster", source: "esri-imagery" },
-  ],
-};
+const ESRI_IMAGERY_SRC = "esri-imagery-src";
+const ESRI_IMAGERY_LYR = "esri-imagery-lyr";
+const ESRI_IMAGERY_TILES = [
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+];
 
 export function initMap(container) {
   return new maplibregl.Map({
@@ -34,8 +22,84 @@ export function initMap(container) {
   });
 }
 
+// In satellite mode we hide the OFM Liberty basemap's `fill` and `line`
+// type layers — the polygon fills (land, water, parks, buildings) and the
+// line layers (road outlines, casings, boundaries, waterways). The Esri
+// imagery shows through underneath.
+//
+// We DO keep `symbol` type layers visible — those are the street name
+// labels, place names, POI markers, highway shields. Hunter specifically
+// asked for satellite to retain street labels on top of the imagery.
+//
+// The matcher excludes anything we own (`route-`, `corridor-`, `esri-`).
+function isOfmBasemapToHide(layer) {
+  if (!layer) return false;
+  if (layer.id === "background") return true;     // background fill explicitly
+  if (layer.id.startsWith("route-")) return false;
+  if (layer.id.startsWith("corridor-")) return false;
+  if (layer.id.startsWith("esri-")) return false;
+  // Hide all fills and lines from the basemap; keep symbols (labels).
+  return layer.type === "fill" || layer.type === "line";
+}
+
+// Add the Esri imagery raster source/layer once, at the BOTTOM of the layer
+// stack. Visibility is toggled by setBasemap; the layer + source are never
+// removed, so toggling doesn't wipe routes/corridor/markers the way setStyle
+// used to.
+//
+// Idempotent: safe to call multiple times (skips if already added). Bind to
+// `map.on("load", ...)` so the style is ready when we addSource/addLayer.
+export function ensureSatelliteLayer(map) {
+  if (map.getSource(ESRI_IMAGERY_SRC)) return;
+  map.addSource(ESRI_IMAGERY_SRC, {
+    type: "raster",
+    tiles: ESRI_IMAGERY_TILES,
+    tileSize: 256,
+    attribution:
+      "Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, " +
+      "GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community",
+  });
+  // Insert ABOVE OFM's background fill but BELOW everything else, so the
+  // imagery sits at z=0+ and OFM labels/lines/our overlays draw on top.
+  // The first non-background layer in the OFM Liberty style is usually a
+  // `landcover-*` fill — putting imagery before it makes imagery the
+  // bottommost visible layer when basemap fills are hidden.
+  const layers = map.getStyle().layers || [];
+  const firstNonBackground = layers.find((l) => l.id !== "background");
+  map.addLayer(
+    {
+      id: ESRI_IMAGERY_LYR,
+      type: "raster",
+      source: ESRI_IMAGERY_SRC,
+      layout: { visibility: "none" },
+    },
+    firstNonBackground ? firstNonBackground.id : undefined,
+  );
+}
+
+// Toggle between streets and satellite without setStyle. setStyle wiped
+// every custom layer (routes, corridor overlay, gap markers) and the
+// post-toggle re-render only restored routes — the corridor + markers
+// silently disappeared. Visibility toggling preserves everything.
 export function setBasemap(map, kind) {
-  map.setStyle(kind === "satellite" ? SATELLITE_STYLE : STREETS_STYLE);
+  const showImagery = kind === "satellite";
+  // Make sure the imagery layer exists (a defensive no-op if it does).
+  ensureSatelliteLayer(map);
+  // Toggle the imagery layer.
+  map.setLayoutProperty(
+    ESRI_IMAGERY_LYR,
+    "visibility",
+    showImagery ? "visible" : "none",
+  );
+  // Hide/show OFM basemap fills + lines so the imagery shows through in
+  // satellite mode (and the streets style is intact in streets mode).
+  // Symbol layers (street name labels, POI labels, place names) stay
+  // visible in both modes.
+  for (const layer of map.getStyle().layers || []) {
+    if (layer.id === ESRI_IMAGERY_LYR) continue;
+    if (!isOfmBasemapToHide(layer)) continue;
+    map.setLayoutProperty(layer.id, "visibility", showImagery ? "none" : "visible");
+  }
 }
 
 let homeMarker = null;

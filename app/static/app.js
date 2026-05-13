@@ -8,6 +8,7 @@
 import {
   initMap,
   setBasemap,
+  ensureSatelliteLayer,
   renderHome,
   renderDestinations,
   renderRoutes,
@@ -36,16 +37,14 @@ window.__map = map;
 
 let basemap = "streets";
 const toggleBtn = document.getElementById("basemap-toggle");
+// Add the Esri imagery layer once at the bottom of the style, hidden by
+// default. Toggling no longer setStyle()s — it flips visibility flags —
+// so routes/corridor/markers persist across mode switches.
+map.on("load", () => ensureSatelliteLayer(map));
 toggleBtn.addEventListener("click", () => {
   basemap = basemap === "streets" ? "satellite" : "streets";
   setBasemap(map, basemap);
   toggleBtn.textContent = basemap === "streets" ? "Satellite" : "Streets";
-  // After the new style finishes loading, re-add route line layers
-  // (setStyle wipes all custom sources/layers).
-  map.once("style.load", () => {
-    const s = state.getState();
-    renderRoutes(map, s.home, s.destinations, s.tier, api.fetchRoutes);
-  });
 });
 
 const tierSelector = document.getElementById("tier-selector");
@@ -623,9 +622,22 @@ function scheduleGapAnalysis() {
 
     lastGapResults.clear();
     for (const [k, v] of perPairResults) lastGapResults.set(k, v);
-    renderCorridorOverlay(map, aggregateCorridorOverlay(perPairResults));
-    renderAvoidedIntersections(map, aggregateIntersections(perPairResults));
-    gapLoading.hidden = true;
+    const corridorGeo = aggregateCorridorOverlay(perPairResults);
+    const intersectionAgg = aggregateIntersections(perPairResults);
+    renderCorridorOverlay(map, corridorGeo);
+    renderAvoidedIntersections(map, intersectionAgg);
+    // Explicit empty-state messaging when no advocacy ask surfaces — without
+    // this the user sees the corridor overlay disappear (or never appear)
+    // and assumes the tool is broken. The trip CAN legitimately have no
+    // corridor: when fast == safe (already on safe streets) or savings
+    // below threshold. We say so out loud and auto-hide after 5s.
+    if (failures.length === 0 && !corridorGeo && intersectionAgg.length === 0) {
+      gapLoadingText.textContent =
+        "No corridor to fix on this trip — the fast route is already safe at this tier.";
+      setTimeout(() => { if (gapLoading) gapLoading.hidden = true; }, 5000);
+    } else {
+      gapLoading.hidden = true;
+    }
     // Re-render drill-down if the user is already drilled in (so the
     // fact-panel headline reflects the freshly-completed gap data).
     const s2 = state.getState();
