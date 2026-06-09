@@ -40,27 +40,34 @@ sources:
     refresh_cadence: "quarterly"
 
   cdot_bike_network:
-    name: "CDOT Chicago Bike Facilities (on-street, facility type)"
+    name: "CDOT Chicago Bikeway Network (on-street, facility type)"
     type: "arcgis_feature_service"
-    # Discovered 2026-06-09 from the CDOT 'Existing Chicago Bike Facilities'
+    # Chosen 2026-06-09 (user): the current public, geometry-enabled CDOT
+    # bikeway layer. Discovered via the 'Existing Chicago Bike Facilities'
     # instant app (appid d4085fb1e59b4eb69a119a4428868ee6) → web map
-    # a693899119c34a71a1e9120802633e6a → operational layer "Chicago Bike Facilities".
-    # 953 polyline features. Native + outSR honored at 4326 (latestWkid 4326).
-    # Facility-type field is DISPLAYROU (alias "Bike Facility Type"); observed
-    # values: PROTECTED BIKE LANE, NEIGHBORHOOD GREENWAY, BUFFERED BIKE LANE,
-    # BIKE LANE, SHARED-LANE. (No separate "Signed Bike Route" value — sharrows
-    # and signed routes collapse into SHARED-LANE.)
-    on_street_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Chicago_Bike_Facilities_2023/FeatureServer/0"
-    facility_type_field: "DISPLAYROU"
+    # a693899119c34a71a1e9120802633e6a → operational layer "Bike Network (Jan 2025)".
+    # 931 polyline features, last edited Jan 2025. outSR honored at 4326.
+    # Facility-type field is BIKE_DSPLY (abbreviated, single-word values):
+    #   PROTECTED → tier 1, NEIGHBORHOOD → tier 1,
+    #   BUFFERED  → tier 2, BIKE       → tier 2,
+    #   SHARED    → tier 3 (sharrow / no physical lane — user decision 2026-06-09).
+    # NB: the newer Sep-2025 and Dec-2025 snapshots in the same app are
+    # attribute-query-only (returnGeometry=true 400s), so unusable for the
+    # spatial match — this Jan-2025 "Final_Public" layer is the most current one
+    # that exports geometry. The Apr-2023 layer (Chicago_Bike_Facilities_2023,
+    # field DISPLAYROU, full-name vocab) is the stable fallback if needed.
+    on_street_url: "https://services.arcgis.com/G3nmNsarwQblLhip/arcgis/rest/services/Bikeway_Network_2024_Final_Public/FeatureServer/0"
+    facility_type_field: "BIKE_DSPLY"
     refresh_cadence: "quarterly"
 
   cdot_off_street_trails:
     name: "CDOT Chicago Off-Street Bike Trails"
     type: "arcgis_feature_service"
-    # Off-street layer from the same web map ("Off-Street Trails"). 89 polyline
-    # features. outSR honored at 4326. All features → tier 1 unconditionally per
-    # design §1.1 (DISPLAYROU here is OFF-STREET TRAIL / ACCESS PATH / blank).
-    trails_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Chicago_Off_Street_Bike_Trails/FeatureServer/0"
+    # Off-street layer "Off-Street Trails (Sept 2025)" from the same web map.
+    # 88 polyline features, last edited Nov 2024. outSR honored at 4326, geometry
+    # exports fine. All features → tier 1 unconditionally per design §1.1, so the
+    # facility-type field is not consulted for this layer.
+    trails_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Trails_Network_2024_11_18/FeatureServer/0"
     refresh_cadence: "quarterly"
 
   cdp_alderman_offices:
