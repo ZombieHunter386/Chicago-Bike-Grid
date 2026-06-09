@@ -30,17 +30,27 @@ The user's rule, expressed against the existing tier scale (1 = safest).
 - Mellow **route** (official on-street route) → tier 2
 - Not in Mellow at all → tier 3
 
-**Step 2 — CDOT override** (CDOT facility type wins where it covers the street), using CDOT's actual facility-type vocabulary:
+**Step 2 — CDOT override** (CDOT facility type wins where it covers the street).
 
-| CDOT facility type | Tier | Rationale |
+The live CDOT layer (chosen 2026-06-09: `Bikeway_Network_2024_Final_Public`, Jan
+2025, field `BIKE_DSPLY`) uses **abbreviated single-word values**, not the
+title-case strings originally drafted here. The classifier keys on these actual
+values (see `docs/dataset-ids.md` for the discovery record):
+
+| `BIKE_DSPLY` value | Tier | Rationale |
 |---|---|---|
-| Protected Bike Lane | **1** | protected → kid |
-| Neighborhood Greenway | **1** | greenway → kid |
-| Off-Street Trail (`Chicago_Off_Street_Bike_Trails`) | **1** | protected/off-street → kid |
-| Buffered Bike Lane | **2** | a lane, not protected → parent |
-| Bike Lane | **2** | a lane, not protected → parent |
-| Marked Shared Lane (sharrow) | **2** *(refinement, §7)* | designated but no lane |
-| Signed Bike Route | **2** *(refinement, §7)* | signage only, no lane |
+| `PROTECTED` | **1** | protected → kid |
+| `NEIGHBORHOOD` | **1** | greenway → kid |
+| Off-Street Trail layer (`Trails_Network_2024_11_18`, whole layer) | **1** | protected/off-street → kid |
+| `BUFFERED` | **2** | a lane, not protected → parent |
+| `BIKE` | **2** | a lane, not protected → parent |
+| `SHARED` | **3** | sharrow — no physical lane (user decision 2026-06-09; supersedes the §7 tier-2 default) |
+
+Unknown `BIKE_DSPLY` values fall through to the Mellow baseline (logged). The
+stable fallback layer `Chicago_Bike_Facilities_2023` uses field `DISPLAYROU` with
+full-name values (`PROTECTED BIKE LANE`, `NEIGHBORHOOD GREENWAY`, `BUFFERED BIKE
+LANE`, `BIKE LANE`, `SHARED-LANE`); if it is ever swapped back in, the
+`CDOT_FACILITY_TO_TIER` table must cover both vocabularies.
 
 **Step 3 — Mellow-path floor (locked 2026-06-09):** CDOT must **not** downgrade a Mellow tier-1 **path** below tier 1. Formally, for a Mellow path segment the final tier is `min(1, cdot_tier)` = 1. For all other segments, `final = cdot_tier if CDOT covers it else mellow_baseline`. In practice off-street paths rarely appear in the on-street CDOT layer, so this only matters at edge cases.
 
@@ -139,13 +149,13 @@ cdot_off_street_trails:
 
 **Resolved with user (2026-06-09):**
 
-1. **CDOT source** — CDOT "Chicago Bike Facilities" ArcGIS instant app (appid `d4085fb1e59b4eb69a119a4428868ee6`): on-street layer `Chicago_Bike_Facilities_2023` + `Chicago_Off_Street_Bike_Trails`. Exact FeatureServer URLs + field name discovered at build time (§3 / Plan task).
+1. **CDOT source** — discovered from the CDOT "Existing Chicago Bike Facilities" ArcGIS instant app (appid `d4085fb1e59b4eb69a119a4428868ee6`). Chosen 2026-06-09: on-street `Bikeway_Network_2024_Final_Public` (Jan 2025, field `BIKE_DSPLY`) + off-street `Trails_Network_2024_11_18`. The named-but-stale `Chicago_Bike_Facilities_2023` (field `DISPLAYROU`) is the documented fallback. The Sep/Dec-2025 snapshots were rejected — they are attribute-query-only (no geometry export). Full record in `docs/dataset-ids.md`.
 2. **Mellow-path floor** — CDOT does **not** downgrade a Mellow tier-1 path. Locked into §1.1 Step 3.
-3. **osmnx graph build** — confirmed.
+3. **osmnx graph build** — confirmed (osmnx 2.1).
+4. **Sharrows → tier 3** (user, 2026-06-09). `SHARED` has no physical lane, so it does not earn a parent-tier override; it falls to tier 3 unless Mellow rates the street. Encoded in the §1.1 Step-2 table.
 
 **Remaining refinements (sane defaults chosen; user may adjust during implementation):**
 
-- **Sharrows / Signed Bike Routes** — these have *no physical lane*. §1.1 currently maps them to tier 2 as "designated" facilities. Alternative: treat them as no-lane (tier 3 unless Mellow rates the street). Low-risk to flip later via the facility-type→tier table.
 - **CDOT on-street vs off-street trail layers** — both feed the classifier; off-street trails are unconditionally tier 1.
 
 ## 8. Blocker: execution environment
