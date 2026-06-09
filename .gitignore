@@ -21,3 +21,6 @@ lts_diff.md
 # Transient frontend dev deps. The state codec test uses `npm install
 # --no-save lz-string` to grab the same library the browser loads via CDN.
 node_modules/
+
+# Git worktrees for feature isolation
+.worktrees/
