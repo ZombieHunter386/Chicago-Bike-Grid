@@ -1,0 +1,147 @@
+# prep/graph/osm_builder.py
+"""Build a routable street graph from OpenStreetMap via osmnx (Phase 3).
+
+Replaces PFB/brokenspoke as the source of the routing topology. Emits lightweight
+OsmEdge / OsmNode records (geometry in EPSG:4326). Phase 4 attaches a tier and
+converts these into the SegmentRecord / IntersectionRecord the DbBuilder consumes.
+
+Gotchas handled here (plan review F2/F3):
+  - osmnx 2.x `graph_from_bbox(bbox, *, ...)` takes a single tuple ordered
+    (left/W, bottom/S, right/E, top/N). Our `target.bbox` is
+    (min_lat, max_lat, min_lng, max_lng), so reorder via `bbox_to_osmnx`.
+  - Simplified osmnx edges carry a *list* of `osmid`s and sometimes a list
+    `name`/`highway`; collapse to a single value for the schema, but keep the
+    full osmid list (`osm_way_ids`) for the Mellow way-ID join in Phase 4.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any
+
+import networkx as nx
+from pyproj import Transformer
+from shapely.geometry import LineString, Point
+from shapely.ops import transform
+
+# WGS84 -> NAD83(2011) Illinois East (metres); matches prep/db/builder.py.
+_TO_IL_EAST_M = Transformer.from_crs("EPSG:4326", "EPSG:6454", always_xy=True).transform
+
+
+@dataclass(frozen=True)
+class OsmEdge:
+    """One undirected street edge from the OSM graph (geometry in EPSG:4326)."""
+
+    road_id: int  # synthesized stable unique int — HIN match key (passed as OsmSegment.osm_id)
+    osm_id: int  # single OSM way id for the schema (first of the osmid list)
+    osm_way_ids: tuple[str, ...]  # all OSM way ids on this edge — Mellow way-id join key
+    head_node_id: int  # osmnx u
+    tail_node_id: int  # osmnx v
+    name: str | None
+    highway: str | None
+    length_m: float
+    geometry_wkt: str
+
+
+@dataclass(frozen=True)
+class OsmNode:
+    node_id: int  # osmnx node id — also the intersection osm_id
+    geometry_wkt: str  # POINT, EPSG:4326
+
+
+def bbox_to_osmnx(
+    target_bbox: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Reorder our (min_lat, max_lat, min_lng, max_lng) to osmnx's (W, S, E, N)."""
+    min_lat, max_lat, min_lng, max_lng = target_bbox
+    return (min_lng, min_lat, max_lng, max_lat)
+
+
+def _first(value: Any) -> Any:
+    """osmnx attrs can be a scalar or a list; return the first scalar."""
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+def _all_way_ids(osmid: Any) -> tuple[str, ...]:
+    if osmid is None:
+        return ()
+    if isinstance(osmid, list):
+        return tuple(str(o) for o in osmid)
+    return (str(osmid),)
+
+
+def build_graph_from_bbox(
+    target_bbox: tuple[float, float, float, float],
+    network_type: str = "bike",
+) -> nx.MultiDiGraph:
+    """Download + simplify the OSM street graph for `target_bbox` via osmnx.
+
+    Returns a simplified MultiDiGraph in EPSG:4326 (osmnx's default output CRS),
+    retaining only the largest connected component so the result is routable.
+    Network-bound; exercised in the Phase 6 integration build, not unit tests.
+    """
+    import osmnx as ox
+
+    # Route osmnx's Overpass response cache under data/cache/ (gitignored).
+    # Left unset, osmnx defaults to `./cache` at the cwd — i.e. the repo root,
+    # which is NOT gitignored and would get littered by a real `make refresh`.
+    ox.settings.cache_folder = "data/cache/osmnx"
+
+    return ox.graph_from_bbox(
+        bbox_to_osmnx(target_bbox),
+        network_type=network_type,
+        simplify=True,
+        retain_all=False,
+    )
+
+
+def build_nodes(graph: nx.MultiDiGraph) -> Iterator[OsmNode]:
+    """Yield an OsmNode per graph node (x = lng, y = lat)."""
+    for node_id, data in graph.nodes(data=True):
+        pt = Point(data["x"], data["y"])
+        yield OsmNode(node_id=int(node_id), geometry_wkt=pt.wkt)
+
+
+def build_street_edges(graph: nx.MultiDiGraph) -> Iterator[OsmEdge]:
+    """Yield one OsmEdge per *undirected* street edge.
+
+    A MultiDiGraph carries both directions of a two-way street; we collapse them
+    to a single record keyed on (unordered node pair, osm_id). road_id is a
+    monotonic counter (stable for a given deterministic graph build).
+    """
+    road_id = 0
+    seen: set[tuple[frozenset[int], int]] = set()
+    for u, v, data in graph.edges(data=True):
+        osmid = data.get("osmid")
+        osm_id = int(_first(osmid))
+        key = (frozenset((int(u), int(v))), osm_id)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        geom = data.get("geometry")
+        if geom is None:
+            geom = LineString([
+                (graph.nodes[u]["x"], graph.nodes[u]["y"]),
+                (graph.nodes[v]["x"], graph.nodes[v]["y"]),
+            ])
+
+        length_m = data.get("length")
+        if length_m is None:
+            length_m = transform(_TO_IL_EAST_M, geom).length
+
+        road_id += 1
+        yield OsmEdge(
+            road_id=road_id,
+            osm_id=osm_id,
+            osm_way_ids=_all_way_ids(osmid),
+            head_node_id=int(u),
+            tail_node_id=int(v),
+            name=_first(data.get("name")),
+            highway=_first(data.get("highway")),
+            length_m=float(length_m),
+            geometry_wkt=geom.wkt,
+        )

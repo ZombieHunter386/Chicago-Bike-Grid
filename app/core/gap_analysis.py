@@ -37,12 +37,10 @@ from dataclasses import dataclass, field
 import numpy as np
 from pyproj import Transformer
 from shapely.geometry import LineString, MultiLineString, Point
-from shapely.geometry.base import BaseGeometry
-from shapely.ops import unary_union
 
 from app.core.graph import GraphSnapshot, edges_for_road_id, vertex_for_int_id
 from app.core.routing import Route, compute_fast_route, compute_safe_route
-from app.core.weights import INF_WEIGHT, TIERS, main_weight_for
+from app.core.weights import INF_WEIGHT, TIERS
 
 # Surface the corridor when total impact warrants action (50m floor) OR when
 # fixing it flips a fallback safe route to a fully on-tier one (any flip is
@@ -217,7 +215,7 @@ def _apply_combined_upgrades(
     # derive the "is head intersection upgraded?" flag from membership in the
     # set of edges marked by g.incident(v, mode="in") for each upgraded
     # intersection — igraph's `incident` IS safe under our use pattern.
-    road_set = set(int(r) for r in road_ids)
+    road_set = {int(r) for r in road_ids}
     seg_up_eids: set[int] = set()
     for rid in road_set:
         edge_pair = edges_for_road_id(snap, rid)
@@ -427,15 +425,17 @@ def analyze_gap(
         if result is None:
             continue
         savings, flips = result
-        v = vertex_for_int_id(snap, iid)
-        lat = float(snap.vertex_coords_wgs84[v][0])
-        lon = float(snap.vertex_coords_wgs84[v][1])
+        vtx = vertex_for_int_id(snap, iid)
+        if vtx is None:
+            continue
+        lat = float(snap.vertex_coords_wgs84[vtx][0])
+        lon = float(snap.vertex_coords_wgs84[vtx][1])
         intersection_records.append(GapIntersection(
             int_id=iid,
             name=_resolve_intersection_name(snap, iid),
-            current_lts_approach=int(snap.vertex_lts_approach[v]),
+            current_lts_approach=int(snap.vertex_lts_approach[vtx]),
             savings_m=savings,
-            on_hin=bool(snap.vertex_on_hin[v]),
+            on_hin=bool(snap.vertex_on_hin[vtx]),
             flips_to_fully_safe=flips,
             geometry_wkt=Point(lon, lat).wkt,
         ))
@@ -496,15 +496,14 @@ def _build_corridor(
     ))
 
     roads: list[CorridorRoad] = []
-    for name_key, new_len_without in zip(name_keys, new_lens_without):
+    for name_key, new_len_without in zip(name_keys, new_lens_without, strict=False):
         rids = by_name[name_key]
-        if new_len_without is None:
-            # Couldn't reach dst without this group's upgrades. Treat as
-            # "savings_without = 0, marginal_loss = combined_savings"
-            # (this road is single-handedly responsible).
-            savings_without = 0.0
-        else:
-            savings_without = current_safe_length - new_len_without
+        # new_len_without is None => couldn't reach dst without this group's
+        # upgrades; treat savings_without = 0 (this road is single-handedly
+        # responsible, so marginal_loss = combined_savings).
+        savings_without = (
+            0.0 if new_len_without is None else current_safe_length - new_len_without
+        )
         marginal_loss = combined_savings - savings_without
 
         # Per-group geometry (MultiLineString of this road's blocks).
@@ -512,11 +511,12 @@ def _build_corridor(
             ln for ln in (_segment_wgs84_line(snap, r) for r in rids) if ln is not None
         ]
         # HIN flag: any block on HIN.
-        on_hin = any(
-            bool(snap.road_on_hin_array[edges_for_road_id(snap, r)[0] // 2])
-            for r in rids
-            if edges_for_road_id(snap, r) is not None
-        )
+        on_hin = False
+        for r in rids:
+            eids = edges_for_road_id(snap, r)
+            if eids is not None and bool(snap.road_on_hin_array[eids[0] // 2]):
+                on_hin = True
+                break
 
         display_name = name_key if not name_key.startswith("__unnamed_") else None
 

@@ -1,0 +1,18 @@
+{
+  "spatialReference": {"wkid": 4326, "latestWkid": 4326},
+  "geometryType": "esriGeometryPolyline",
+  "features": [
+    {
+      "attributes": {"OBJECTID": 1, "BIKE_DSPLY": "PROTECTED", "STREET": "Dearborn St"},
+      "geometry": {"paths": [[[-87.6294, 41.8810], [-87.6294, 41.8850]]]}
+    },
+    {
+      "attributes": {"OBJECTID": 2, "BIKE_DSPLY": "BUFFERED", "STREET": "Wells St"},
+      "geometry": {"paths": [[[-87.6340, 41.8810], [-87.6340, 41.8850]]]}
+    },
+    {
+      "attributes": {"OBJECTID": 3, "BIKE_DSPLY": "SHARED", "STREET": "Clark St"},
+      "geometry": {"paths": [[[-87.6310, 41.8810], [-87.6310, 41.8850]]]}
+    }
+  ]
+}

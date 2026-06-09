@@ -8,7 +8,7 @@ Two views ship in v1:
 
 ## Setup
 
-1. Install Python 3.11+ and Docker (Docker required for brokenspoke-analyzer in the prep pipeline).
+1. Install Python 3.11+. (No Docker needed — the prep pipeline builds the routing graph from OpenStreetMap via `osmnx` and classifies bike-stress tiers from the Mellow Bike Map + CDOT bike-facility layers.)
 2. `python -m venv .venv && source .venv/bin/activate`
 3. `pip install -r requirements.txt`
 4. Optionally `cp .env.example .env` and fill in `SOCRATA_APP_TOKEN`.

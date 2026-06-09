@@ -20,12 +20,45 @@ sources:
     intersections_url: "https://services5.arcgis.com/LcMXE3TFhi1BSaCY/arcgis/rest/services/Cook_County_SAP_Traffic_Safety_Analysis/FeatureServer/5"
     refresh_cadence: "monthly"
 
-  cdot_bike_facilities:
-    name: "CDOT Bike Routes (sanity check only)"
-    type: "socrata"
-    domain: "data.cityofchicago.org"
-    dataset_id: "hvv9-38ut"  # verified — 'Bike Routes', 11 cols including the_geom + STREET + ONEWAY_DIR
-    refresh_cadence: "monthly"
+  mellow:
+    name: "Mellow Bike Map routes (jeancochrane/mellow-bike-map, MIT)"
+    type: "github_fixture"
+    # Django dumpdata fixtures of model mbm.mellowroute; route kind ∈ {route, street, path}.
+    # Exact fixture file paths confirmed at build time in Phase 2a.
+    fixtures_repo: "jeancochrane/mellow-bike-map"
+    fixtures_path: "app/mbm/fixtures/"
+    refresh_cadence: "quarterly"
+
+  cdot_bike_network:
+    name: "CDOT Chicago Bikeway Network (on-street, facility type)"
+    type: "arcgis_feature_service"
+    # Chosen 2026-06-09 (user): the current public, geometry-enabled CDOT
+    # bikeway layer. Discovered via the 'Existing Chicago Bike Facilities'
+    # instant app (appid d4085fb1e59b4eb69a119a4428868ee6) → web map
+    # a693899119c34a71a1e9120802633e6a → operational layer "Bike Network (Jan 2025)".
+    # 931 polyline features, last edited Jan 2025. outSR honored at 4326.
+    # Facility-type field is BIKE_DSPLY (abbreviated, single-word values):
+    #   PROTECTED → tier 1, NEIGHBORHOOD → tier 1,
+    #   BUFFERED  → tier 2, BIKE       → tier 2,
+    #   SHARED    → tier 3 (sharrow / no physical lane — user decision 2026-06-09).
+    # NB: the newer Sep-2025 and Dec-2025 snapshots in the same app are
+    # attribute-query-only (returnGeometry=true 400s), so unusable for the
+    # spatial match — this Jan-2025 "Final_Public" layer is the most current one
+    # that exports geometry. The Apr-2023 layer (Chicago_Bike_Facilities_2023,
+    # field DISPLAYROU, full-name vocab) is the stable fallback if needed.
+    on_street_url: "https://services.arcgis.com/G3nmNsarwQblLhip/arcgis/rest/services/Bikeway_Network_2024_Final_Public/FeatureServer/0"
+    facility_type_field: "BIKE_DSPLY"
+    refresh_cadence: "quarterly"
+
+  cdot_off_street_trails:
+    name: "CDOT Chicago Off-Street Bike Trails"
+    type: "arcgis_feature_service"
+    # Off-street layer "Off-Street Trails (Sept 2025)" from the same web map.
+    # 88 polyline features, last edited Nov 2024. outSR honored at 4326, geometry
+    # exports fine. All features → tier 1 unconditionally per design §1.1, so the
+    # facility-type field is not consulted for this layer.
+    trails_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Trails_Network_2024_11_18/FeatureServer/0"
+    refresh_cadence: "quarterly"
 
   cdp_alderman_offices:
     name: "Chicago Aldermanic Ward Offices"
@@ -40,16 +73,6 @@ sources:
     domain: "data.cityofchicago.org"
     dataset_id: "x8fc-8rcq"  # verified — 'Libraries - Locations, Contact Information, and Usual Hours of Operation'
     refresh_cadence: "monthly"
-
-brokenspoke:
-  image: "ghcr.io/peopleforbikes/brokenspoke-analyzer:3.1.1"
-  city_country: "united states"
-  city_name: "chicago"
-  city_state: "illinois"
-  city_fips: "1714000"
-  database_url: "postgresql://postgres:postgres@postgres:5432/postgres"
-  network_name: "bikemap-brokenspoke_default"
-  compose_file: "docker/compose.brokenspoke.yml"
 
 target:
   name: "Chicago"

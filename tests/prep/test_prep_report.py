@@ -17,14 +17,14 @@ def test_prep_report_includes_per_source_status_and_deltas(tmp_path: Path) -> No
             warnings=[],
         ),
         SourceRunSummary(
-            name="cdot_bike_facilities",
+            name="cdot_facilities",
             status="WARN",
             record_count=400,
             previous_record_count=420,
             warnings=["3 rows missing geometry"],
         ),
         SourceRunSummary(
-            name="brokenspoke",
+            name="mellow",
             status="OK",
             record_count=80000,
             previous_record_count=None,

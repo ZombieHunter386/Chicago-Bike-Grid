@@ -302,7 +302,7 @@ def _poi(name: str, category: str, lat: float, lon: float) -> PoiRecord:
         name=name,
         address=None,
         category=category,
-        source="brokenspoke",
+        source="osm",
         geometry_wkt=f"POINT ({lon} {lat})",
         raw_properties={},
     )
