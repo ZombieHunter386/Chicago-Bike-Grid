@@ -26,6 +26,42 @@ sources:
     domain: "data.cityofchicago.org"
     dataset_id: "hvv9-38ut"  # verified — 'Bike Routes', 11 cols including the_geom + STREET + ONEWAY_DIR
     refresh_cadence: "monthly"
+    # NOTE: superseded by the richer cdot_bike_network / cdot_off_street_trails
+    # ArcGIS layers below (which carry the facility-type field). Kept as a
+    # cross-check; safe to remove once the new classifier is in (Phase 5).
+
+  mellow:
+    name: "Mellow Bike Map routes (jeancochrane/mellow-bike-map, MIT)"
+    type: "github_fixture"
+    # Django dumpdata fixtures of model mbm.mellowroute; route kind ∈ {route, street, path}.
+    # Exact fixture file paths confirmed at build time in Phase 2a.
+    fixtures_repo: "jeancochrane/mellow-bike-map"
+    fixtures_path: "app/mbm/fixtures/"
+    refresh_cadence: "quarterly"
+
+  cdot_bike_network:
+    name: "CDOT Chicago Bike Facilities (on-street, facility type)"
+    type: "arcgis_feature_service"
+    # Discovered 2026-06-09 from the CDOT 'Existing Chicago Bike Facilities'
+    # instant app (appid d4085fb1e59b4eb69a119a4428868ee6) → web map
+    # a693899119c34a71a1e9120802633e6a → operational layer "Chicago Bike Facilities".
+    # 953 polyline features. Native + outSR honored at 4326 (latestWkid 4326).
+    # Facility-type field is DISPLAYROU (alias "Bike Facility Type"); observed
+    # values: PROTECTED BIKE LANE, NEIGHBORHOOD GREENWAY, BUFFERED BIKE LANE,
+    # BIKE LANE, SHARED-LANE. (No separate "Signed Bike Route" value — sharrows
+    # and signed routes collapse into SHARED-LANE.)
+    on_street_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Chicago_Bike_Facilities_2023/FeatureServer/0"
+    facility_type_field: "DISPLAYROU"
+    refresh_cadence: "quarterly"
+
+  cdot_off_street_trails:
+    name: "CDOT Chicago Off-Street Bike Trails"
+    type: "arcgis_feature_service"
+    # Off-street layer from the same web map ("Off-Street Trails"). 89 polyline
+    # features. outSR honored at 4326. All features → tier 1 unconditionally per
+    # design §1.1 (DISPLAYROU here is OFF-STREET TRAIL / ACCESS PATH / blank).
+    trails_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Chicago_Off_Street_Bike_Trails/FeatureServer/0"
+    refresh_cadence: "quarterly"
 
   cdp_alderman_offices:
     name: "Chicago Aldermanic Ward Offices"
