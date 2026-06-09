@@ -78,7 +78,7 @@ def test_builder_writes_pois(tmp_path: Path) -> None:
         category="school",
         address=None,
         geometry_wkt="POINT(-87.683 41.945)",
-        source="brokenspoke",
+        source="osm",
         raw_properties={},
     )
     builder.insert_pois([poi])
@@ -88,7 +88,7 @@ def test_builder_writes_pois(tmp_path: Path) -> None:
     rows = conn.execute(
         "SELECT name, category, source FROM pois"
     ).fetchall()
-    assert rows == [("Audubon Elementary", "school", "brokenspoke")]
+    assert rows == [("Audubon Elementary", "school", "osm")]
 
 
 def test_builder_records_meta(tmp_path: Path) -> None:

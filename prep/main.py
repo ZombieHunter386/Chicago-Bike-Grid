@@ -18,11 +18,32 @@ from prep.config_loader import load_sources_config
 from prep.db.builder import DbBuilder
 from prep.db.treatments_loader import load_treatments
 from prep.fetchers.base import rotate_snapshots, today_snapshot_dir
-from prep.fetchers.cdot_sanity import CdotBikewaysFetcher
+from prep.fetchers.cdot_facilities import (
+    OFF_STREET_FILENAME as CDOT_OFF_STREET_FILENAME,
+)
+from prep.fetchers.cdot_facilities import (
+    ON_STREET_FILENAME as CDOT_ON_STREET_FILENAME,
+)
+from prep.fetchers.cdot_facilities import (
+    CdotFacilitiesFetcher,
+    parse_cdot_facilities,
+)
 from prep.fetchers.hin import HinFetcher
+from prep.fetchers.mellow import (
+    FIXTURE_FILENAME as MELLOW_FIXTURE_FILENAME,
+)
+from prep.fetchers.mellow import (
+    MellowFetcher,
+    parse_mellow_features,
+)
 from prep.fetchers.pois_cdp import CdpPoisFetcher
 from prep.fetchers.pois_osm import OsmPoisFetcher
 from prep.fetchers.speed_limits import SpeedLimitsFetcher
+from prep.graph.osm_builder import (
+    build_graph_from_bbox,
+    build_nodes,
+    build_street_edges,
+)
 from prep.joins.hin_to_osm import (
     HinIntersectionFeature,
     HinIntersectionMatch,
@@ -34,17 +55,15 @@ from prep.joins.hin_to_osm import (
     join_hin_segments_to_osm,
 )
 from prep.lts.ingest import (
-    ingest_brokenspoke_pois,
     ingest_cdp_pois,
     ingest_osm_pois,
-    ingest_segments,
 )
-from prep.lts.runner import BrokenspokeRunner
-from prep.lts.synthesize_intersections import synthesize_intersections
 from prep.lts_network_export import export_lts_network
 from prep.reporting.hin_match_report import build_hin_match_report
 from prep.reporting.lts_diff import diff_lts_against_previous
 from prep.reporting.prep_report import SourceRunSummary, build_prep_report
+from prep.scoring.classify_network import classify_network
+from prep.scoring.intersection_tiers import build_intersection_records
 
 CODE_VERSION = "0.1.0"
 
@@ -177,11 +196,9 @@ def run_pipeline(
     *,
     config_path: Path,
     cache_dir: Path,
-    brokenspoke_results_dir: Path,
     db_path: Path,
     treatments_dir: Path,
     report_path: Path,
-    skip_brokenspoke: bool = False,
 ) -> PipelineResult:
     """Run the full prep pipeline. All-or-nothing: failures preserve previous DB."""
     started = dt.datetime.now(dt.UTC)
@@ -203,15 +220,29 @@ def run_pipeline(
             previous_record_count=None, warnings=r.warnings,
         ))
 
-    cdot_src = cfg.sources.get("cdot_bike_facilities")
-    if cdot_src is not None:
-        cdot = CdotBikewaysFetcher(
-            domain=cdot_src.extra["domain"],
-            dataset_id=cdot_src.extra["dataset_id"],
+    mellow_src = cfg.sources.get("mellow")
+    if mellow_src is not None:
+        mellow = MellowFetcher(
+            fixtures_repo=mellow_src.extra["fixtures_repo"],
+            fixtures_path=mellow_src.extra["fixtures_path"],
         )
-        r = cdot.fetch(snapshot_dir)
+        r = mellow.fetch(snapshot_dir)
         sources.append(SourceRunSummary(
-            name="cdot_bike_facilities", status=r.status, record_count=r.record_count,
+            name="mellow", status=r.status, record_count=r.record_count,
+            previous_record_count=None, warnings=r.warnings,
+        ))
+
+    cdot_net_src = cfg.sources.get("cdot_bike_network")
+    cdot_trails_src = cfg.sources.get("cdot_off_street_trails")
+    if cdot_net_src is not None and cdot_trails_src is not None:
+        cdot_fac = CdotFacilitiesFetcher(
+            on_street_url=cdot_net_src.extra["on_street_url"],
+            facility_type_field=cdot_net_src.extra["facility_type_field"],
+            trails_url=cdot_trails_src.extra["trails_url"],
+        )
+        r = cdot_fac.fetch(snapshot_dir)
+        sources.append(SourceRunSummary(
+            name="cdot_facilities", status=r.status, record_count=r.record_count,
             previous_record_count=None, warnings=r.warnings,
         ))
 
@@ -248,54 +279,7 @@ def run_pipeline(
         previous_record_count=None, warnings=r.warnings,
     ))
 
-    # 2. Run brokenspoke (unless skipped)
-    results_path: Path | None = None
-    if not skip_brokenspoke:
-        try:
-            runner = BrokenspokeRunner(
-                image=cfg.brokenspoke.image,
-                city_country=cfg.brokenspoke.city_country,
-                city_name=cfg.brokenspoke.city_name,
-                city_state=cfg.brokenspoke.city_state,
-                city_fips=cfg.brokenspoke.city_fips,
-                database_url=cfg.brokenspoke.database_url,
-                network_name=cfg.brokenspoke.network_name,
-                results_dir=brokenspoke_results_dir,
-                compose_file=Path(cfg.brokenspoke.compose_file),
-            )
-            results_path = runner.run()
-            sources.append(SourceRunSummary(
-                name="brokenspoke", status="OK",
-                record_count=0,
-                previous_record_count=None, warnings=[],
-            ))
-        except Exception as e:  # noqa: BLE001
-            sources.append(SourceRunSummary(
-                name="brokenspoke", status="FAIL",
-                record_count=0,
-                previous_record_count=None, warnings=[f"brokenspoke run failed: {e}"],
-            ))
-    else:
-        # No runner — try resolving an existing results dir (e.g. PFB pre-computed data
-        # placed there manually, or a re-run that's reusing previous output).
-        candidate = (
-            brokenspoke_results_dir
-            / cfg.brokenspoke.city_country.lower().replace(" ", "-")
-            / cfg.brokenspoke.city_state.lower().replace(" ", "-")
-            / cfg.brokenspoke.city_name.lower().replace(" ", "-")
-        )
-        if candidate.exists():
-            version_dirs = sorted(p for p in candidate.iterdir() if p.is_dir())
-            if version_dirs:
-                # Use the lexicographically-last version dir (PFB releases are date-shaped: 25.01)
-                results_path = version_dirs[-1]
-                sources.append(SourceRunSummary(
-                    name="brokenspoke",
-                    status="OK",
-                    record_count=0,
-                    previous_record_count=None,
-                    warnings=[f"using pre-existing results from {results_path.name}"],
-                ))
+    # 2. (Topology now comes from OSM in the build step below — no external runner.)
 
     # 3. Read previous DB's meta for delta calculation (before FAIL check).
     previous_record_counts: dict[str, int] = {}
@@ -340,54 +324,71 @@ def run_pipeline(
         builder = DbBuilder(tmp_db)
         builder.create_schema()
 
-        if results_path is not None:
-            segs = list(ingest_segments(results_path / "neighborhood_ways.shp"))
-            ints = synthesize_intersections(segs)
-            pois = list(ingest_brokenspoke_pois(results_path))
-            pois.extend(ingest_osm_pois(snapshot_dir))
-            pois.extend(ingest_cdp_pois(snapshot_dir))
+        # Topology from OSM (osmnx); tier from Mellow (baseline) + CDOT (override).
+        graph = build_graph_from_bbox(cfg.target.bbox)
+        edges = list(build_street_edges(graph))
+        nodes = list(build_nodes(graph))
 
-            hin_seg_path = snapshot_dir / "hin_segments.geojson"
-            hin_int_path = snapshot_dir / "hin_intersections.geojson"
-            hin_segs, _ = _hin_features_from_geojson(hin_seg_path, "segment")
-            _, hin_ints = _hin_features_from_geojson(hin_int_path, "intersection")
-
-            # OsmSegment.osm_id field carries the unique segment key for HIN
-            # matching — we pass road_id (PFB per-row unique ID) so HIN
-            # attributes apply per-block. OsmIntersection.osm_id carries
-            # PFB intersection node IDs (i.osm_id is set to the int_id by
-            # synthesize_intersections).
-            osm_segs = [
-                OsmSegment(osm_id=s.road_id, geometry=wkt.loads(s.geometry_wkt))
-                for s in segs
-            ]
-            osm_ints = [
-                OsmIntersection(osm_id=i.osm_id, geometry=wkt.loads(i.geometry_wkt))
-                for i in ints
-            ]
-
-            seg_matches = list(join_hin_segments_to_osm(
-                hin_segments=hin_segs, osm_segments=osm_segs,
+        mellow_features = (
+            list(parse_mellow_features(snapshot_dir / MELLOW_FIXTURE_FILENAME))
+            if mellow_src is not None
+            else []
+        )
+        cdot_facilities = (
+            list(parse_cdot_facilities(
+                snapshot_dir / CDOT_ON_STREET_FILENAME,
+                snapshot_dir / CDOT_OFF_STREET_FILENAME,
+                cdot_net_src.extra["facility_type_field"],
             ))
-            int_matches = list(join_hin_intersections_to_osm(
-                hin_intersections=hin_ints, osm_intersections=osm_ints,
-            ))
+            if cdot_net_src is not None and cdot_trails_src is not None
+            else []
+        )
 
-            seg_match_map = _accumulate_segment_matches(seg_matches)
-            int_match_map = _accumulate_intersection_matches(int_matches)
+        segs = classify_network(edges, mellow_features, cdot_facilities)
+        ints = build_intersection_records(nodes, segs)
 
-            builder.insert_hin_features(hin_segs, hin_ints)
-            builder.insert_streets(segs, hin_matches=seg_match_map)
-            builder.insert_intersections(ints, hin_matches=int_match_map)
-            builder.insert_pois(pois)
+        pois = list(ingest_osm_pois(snapshot_dir))
+        pois.extend(ingest_cdp_pois(snapshot_dir))
 
-            hin_report = build_hin_match_report(
-                hin_segments=hin_segs,
-                hin_intersections=hin_ints,
-                segment_matches=seg_matches,
-                intersection_matches=int_matches,
-            )
-            (report_path.parent / "hin_match_report.md").write_text(hin_report.to_markdown())
+        hin_seg_path = snapshot_dir / "hin_segments.geojson"
+        hin_int_path = snapshot_dir / "hin_intersections.geojson"
+        hin_segs, _ = _hin_features_from_geojson(hin_seg_path, "segment")
+        _, hin_ints = _hin_features_from_geojson(hin_int_path, "intersection")
+
+        # OsmSegment.osm_id carries the unique segment key for HIN matching — we
+        # pass each edge's synthesized road_id so HIN attributes apply per-block.
+        # OsmIntersection.osm_id carries the OSM node id (IntersectionRecord.osm_id).
+        osm_segs = [
+            OsmSegment(osm_id=s.road_id, geometry=wkt.loads(s.geometry_wkt))
+            for s in segs
+        ]
+        osm_ints = [
+            OsmIntersection(osm_id=i.osm_id, geometry=wkt.loads(i.geometry_wkt))
+            for i in ints
+        ]
+
+        seg_matches = list(join_hin_segments_to_osm(
+            hin_segments=hin_segs, osm_segments=osm_segs,
+        ))
+        int_matches = list(join_hin_intersections_to_osm(
+            hin_intersections=hin_ints, osm_intersections=osm_ints,
+        ))
+
+        seg_match_map = _accumulate_segment_matches(seg_matches)
+        int_match_map = _accumulate_intersection_matches(int_matches)
+
+        builder.insert_hin_features(hin_segs, hin_ints)
+        builder.insert_streets(segs, hin_matches=seg_match_map)
+        builder.insert_intersections(ints, hin_matches=int_match_map)
+        builder.insert_pois(pois)
+
+        hin_report = build_hin_match_report(
+            hin_segments=hin_segs,
+            hin_intersections=hin_ints,
+            segment_matches=seg_matches,
+            intersection_matches=int_matches,
+        )
+        (report_path.parent / "hin_match_report.md").write_text(hin_report.to_markdown())
 
         load_treatments(treatments_dir, builder)
 
@@ -455,30 +456,20 @@ def main() -> int:
         "--config", type=Path, default=Path("prep/config/sources.yaml"),
     )
     parser.add_argument("--cache-dir", type=Path, default=Path("data/cache"))
-    parser.add_argument(
-        "--brokenspoke-results-dir", type=Path, default=Path("data/brokenspoke_results"),
-    )
     parser.add_argument("--db", type=Path, default=Path("data/bikemap.db"))
     parser.add_argument("--treatments-dir", type=Path, default=Path("treatments"))
     parser.add_argument("--report", type=Path, default=Path("prep_report.md"))
-    parser.add_argument(
-        "--skip-brokenspoke", action="store_true",
-        help="Skip the brokenspoke run (useful when iterating on ingest/join code).",
-    )
     args = parser.parse_args()
 
     args.cache_dir.mkdir(parents=True, exist_ok=True)
-    args.brokenspoke_results_dir.mkdir(parents=True, exist_ok=True)
     args.db.parent.mkdir(parents=True, exist_ok=True)
 
     result = run_pipeline(
         config_path=args.config,
         cache_dir=args.cache_dir,
-        brokenspoke_results_dir=args.brokenspoke_results_dir,
         db_path=args.db,
         treatments_dir=args.treatments_dir,
         report_path=args.report,
-        skip_brokenspoke=args.skip_brokenspoke,
     )
 
     return 0 if result.status != "FAIL" else 1

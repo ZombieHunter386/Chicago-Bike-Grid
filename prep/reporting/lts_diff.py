@@ -14,10 +14,10 @@ class LtsDiff:
 
     def to_markdown(self) -> str:
         lines = [
-            "# LTS Regression Diff",
+            "# Stress-Tier Regression Diff (Mellow + CDOT)",
             "",
             f"- Total segments in current run: **{self.total_segments}**",
-            f"- LTS changed (vs previous): **{len(self.changed)}**",
+            f"- Tier changed (vs previous): **{len(self.changed)}**",
             f"- New segments: **{len(self.added)}**",
             f"- Removed segments: **{len(self.removed)}**",
             "",
@@ -26,9 +26,9 @@ class LtsDiff:
             buckets: dict[tuple[int, int], int] = {}
             for _, prev, curr in self.changed:
                 buckets[(prev, curr)] = buckets.get((prev, curr), 0) + 1
-            lines.append("## LTS transitions")
+            lines.append("## Tier transitions")
             lines.append("")
-            lines.append("| Previous LTS | Current LTS | Count |")
+            lines.append("| Previous tier | Current tier | Count |")
             lines.append("|---|---|---|")
             for (p, c), n in sorted(buckets.items()):
                 lines.append(f"| {p} | {c} | {n} |")

@@ -1,0 +1,14 @@
+{
+  "spatialReference": {"wkid": 4326, "latestWkid": 4326},
+  "geometryType": "esriGeometryPolyline",
+  "features": [
+    {
+      "attributes": {"OBJECTID": 10, "TRAIL_NAME": "Lakefront Trail"},
+      "geometry": {"paths": [[[-87.6200, 41.8900], [-87.6190, 41.8950]]]}
+    },
+    {
+      "attributes": {"OBJECTID": 11, "TRAIL_NAME": "606 Bloomingdale"},
+      "geometry": {"paths": [[[-87.7000, 41.9135], [-87.6900, 41.9135]]]}
+    }
+  ]
+}

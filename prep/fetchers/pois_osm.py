@@ -43,12 +43,23 @@ class OsmPoisFetcher(Fetcher):
     name = "osm_pois"
 
     # OSM tag dict per category. Each value can be True (any value) or list of values.
+    # The first 5 are the originally-OSM-derived categories; the remaining 8 are
+    # the categories brokenspoke formerly repackaged (review F1, user decision
+    # 2026-06-09: keep all 13). All come from the same OSM data brokenspoke used.
     CATEGORY_TAGS: dict[str, dict[str, Any]] = {
         "school": {"amenity": "school"},
         "park": {"leisure": "park"},
         "grocery": {"shop": ["supermarket", "grocery"]},
         "hospital": {"amenity": "hospital"},
         "transit": {"railway": "station"},
+        "pharmacy": {"amenity": "pharmacy"},
+        "doctor": {"amenity": "doctors"},
+        "dentist": {"amenity": "dentist"},
+        "university": {"amenity": "university"},
+        "college": {"amenity": "college"},
+        "community_center": {"amenity": "community_centre"},
+        "social_services": {"amenity": "social_facility"},
+        "retail": {"shop": True},
     }
     # Park area filter (in m²). Spec §3.6 says "≥ 0.5 acre" = 2023 m².
     MIN_PARK_AREA_M2 = 2023.0
@@ -66,6 +77,12 @@ class OsmPoisFetcher(Fetcher):
         # half-closed and our process never notices. The signal-based alarm
         # in `_fetch_category` covers that backstop.
         ox.settings.requests_timeout = 120
+
+        # Route osmnx's Overpass response cache under data/cache/ (gitignored).
+        # This fetcher runs *before* the graph builder, so we can't rely on the
+        # builder's setting — left unset, osmnx defaults to `./cache` at the cwd
+        # (the repo root, NOT gitignored) and litters it on every prep run.
+        ox.settings.cache_folder = "data/cache/osmnx"
 
         warnings: list[str] = []
         total = 0

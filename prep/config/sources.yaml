@@ -20,16 +20,6 @@ sources:
     intersections_url: "https://services5.arcgis.com/LcMXE3TFhi1BSaCY/arcgis/rest/services/Cook_County_SAP_Traffic_Safety_Analysis/FeatureServer/5"
     refresh_cadence: "monthly"
 
-  cdot_bike_facilities:
-    name: "CDOT Bike Routes (sanity check only)"
-    type: "socrata"
-    domain: "data.cityofchicago.org"
-    dataset_id: "hvv9-38ut"  # verified — 'Bike Routes', 11 cols including the_geom + STREET + ONEWAY_DIR
-    refresh_cadence: "monthly"
-    # NOTE: superseded by the richer cdot_bike_network / cdot_off_street_trails
-    # ArcGIS layers below (which carry the facility-type field). Kept as a
-    # cross-check; safe to remove once the new classifier is in (Phase 5).
-
   mellow:
     name: "Mellow Bike Map routes (jeancochrane/mellow-bike-map, MIT)"
     type: "github_fixture"
@@ -83,16 +73,6 @@ sources:
     domain: "data.cityofchicago.org"
     dataset_id: "x8fc-8rcq"  # verified — 'Libraries - Locations, Contact Information, and Usual Hours of Operation'
     refresh_cadence: "monthly"
-
-brokenspoke:
-  image: "ghcr.io/peopleforbikes/brokenspoke-analyzer:3.1.1"
-  city_country: "united states"
-  city_name: "chicago"
-  city_state: "illinois"
-  city_fips: "1714000"
-  database_url: "postgresql://postgres:postgres@postgres:5432/postgres"
-  network_name: "bikemap-brokenspoke_default"
-  compose_file: "docker/compose.brokenspoke.yml"
 
 target:
   name: "Chicago"

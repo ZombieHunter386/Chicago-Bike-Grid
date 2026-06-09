@@ -3,18 +3,29 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import geopandas as gpd
+import networkx as nx
 from shapely.geometry import LineString
 
 from prep.fetchers.base import FetchResult
+from prep.fetchers.mellow import MellowFeature
 from prep.main import PipelineResult, _hin_features_from_geojson, run_pipeline
 
 
-def _write_pfb_shapefile(path: Path, rows: list[dict]) -> None:
-    """Write a PFB-shaped shapefile fixture for testing."""
-    geoms = [LineString(r.pop("_coords")) for r in rows]
-    gdf = gpd.GeoDataFrame(rows, geometry=geoms, crs="EPSG:32616")
-    gdf.to_file(path, driver="ESRI Shapefile")
+def _make_graph() -> nx.MultiDiGraph:
+    """Two edges sharing node 11 -> 3 nodes, 2 undirected street edges."""
+    g = nx.MultiDiGraph()
+    g.add_node(10, x=-87.680, y=41.940)
+    g.add_node(11, x=-87.670, y=41.940)
+    g.add_node(12, x=-87.670, y=41.950)
+    g.add_edge(
+        10, 11, osmid=111, name="W Foster Ave", highway="residential", length=100.0,
+        geometry=LineString([(-87.680, 41.940), (-87.670, 41.940)]),
+    )
+    g.add_edge(
+        11, 12, osmid=222, name="N Hoyne Ave", highway="residential", length=100.0,
+        geometry=LineString([(-87.670, 41.940), (-87.670, 41.950)]),
+    )
+    return g
 
 
 def _write_yaml_config(path: Path) -> None:
@@ -27,18 +38,29 @@ sources:
     segments_url: "https://example.com/seg"
     intersections_url: "https://example.com/int"
     refresh_cadence: "monthly"
-  cdot_bike_facilities:
-    name: "CDOT Bike Facilities"
-    type: "socrata"
-    domain: "data.cityofchicago.org"
-    dataset_id: "test-cdot-id"
-    refresh_cadence: "monthly"
   chicago_speed_limits:
     name: "Chicago Speed Limits"
     type: "socrata"
     domain: "data.cityofchicago.org"
     dataset_id: "test-speed-id"
     refresh_cadence: "monthly"
+  mellow:
+    name: "Mellow Bike Map"
+    type: "github_fixture"
+    fixtures_repo: "jeancochrane/mellow-bike-map"
+    fixtures_path: "app/mbm/fixtures/"
+    refresh_cadence: "quarterly"
+  cdot_bike_network:
+    name: "CDOT Bikeway Network"
+    type: "arcgis_feature_service"
+    on_street_url: "https://example.com/cdot_on"
+    facility_type_field: "BIKE_DSPLY"
+    refresh_cadence: "quarterly"
+  cdot_off_street_trails:
+    name: "CDOT Off-Street Trails"
+    type: "arcgis_feature_service"
+    trails_url: "https://example.com/cdot_off"
+    refresh_cadence: "quarterly"
   cdp_alderman_offices:
     name: "CDP Alderman Offices"
     type: "socrata"
@@ -51,14 +73,6 @@ sources:
     domain: "data.cityofchicago.org"
     dataset_id: "test-lib-id"
     refresh_cadence: "monthly"
-brokenspoke:
-  image: "test/img:1.0"
-  city_country: "united states"
-  city_name: "chicago"
-  city_state: "illinois"
-  city_fips: "1714000"
-  database_url: "postgresql://test"
-  network_name: "test_net"
 target:
   name: "Chicago"
   bbox:
@@ -70,19 +84,25 @@ target:
     )
 
 
+@patch("prep.main.parse_cdot_facilities")
+@patch("prep.main.parse_mellow_features")
+@patch("prep.main.build_graph_from_bbox")
 @patch("prep.main.OsmPoisFetcher")
-@patch("prep.main.HinFetcher")
-@patch("prep.main.CdotBikewaysFetcher")
+@patch("prep.main.CdotFacilitiesFetcher")
+@patch("prep.main.MellowFetcher")
 @patch("prep.main.SpeedLimitsFetcher")
 @patch("prep.main.CdpPoisFetcher")
-@patch("prep.main.BrokenspokeRunner")
+@patch("prep.main.HinFetcher")
 def test_run_pipeline_happy_path_writes_db_and_report(
-    mock_bs: MagicMock,
+    mock_hin: MagicMock,
     mock_cdp: MagicMock,
     mock_speed: MagicMock,
-    mock_cdot: MagicMock,
-    mock_hin: MagicMock,
+    mock_mellow: MagicMock,
+    mock_cdot_fac: MagicMock,
     mock_osm_pois: MagicMock,
+    mock_build_graph: MagicMock,
+    mock_parse_mellow: MagicMock,
+    mock_parse_cdot: MagicMock,
     tmp_path: Path,
     fixtures_dir: Path,
 ) -> None:
@@ -93,54 +113,28 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     db_path = tmp_path / "bikemap.db"
     treatments_dir = tmp_path / "treatments"
     treatments_dir.mkdir()
-    results_dir = tmp_path / "brokenspoke_results" / "united-states" / "illinois" / "chicago" / "23.11"
-    results_dir.mkdir(parents=True)
 
     def _ok(records: int) -> FetchResult:
         return FetchResult(path=cache_dir, record_count=records, status="OK", warnings=[])
 
     mock_hin.return_value.fetch.return_value = _ok(50)
-    mock_cdot.return_value.fetch.return_value = _ok(400)
     mock_speed.return_value.fetch.return_value = _ok(200)
+    mock_mellow.return_value.fetch.return_value = _ok(300)
+    mock_cdot_fac.return_value.fetch.return_value = _ok(900)
     mock_cdp.return_value.fetch.return_value = _ok(60)
     mock_osm_pois.return_value.fetch.return_value = _ok(20)
 
-    mock_bs.return_value.run.return_value = results_dir
-    _write_pfb_shapefile(results_dir / "neighborhood_ways.shp", [
-        {
-            "ROAD_ID": 1,
-            "OSM_ID": 12345,
-            "INTERSECTI": 100,
-            "INTERSE_01": 101,
-            "NAME": "W Foster Ave",
-            "FT_SEG_STR": 4,
-            "TF_SEG_STR": 4,
-            "FT_INT_STR": 3,
-            "TF_INT_STR": 3,
-            "FUNCTIONAL": "primary",
-            "SPEED_LIMI": 30,
-            "_coords": [(440000.0, 4640000.0), (440100.0, 4640000.0)],
-        },
-        {
-            "ROAD_ID": 2,
-            "OSM_ID": 67890,
-            "INTERSECTI": 101,             # shared with prior segment's tail
-            "INTERSE_01": 102,
-            "NAME": "N Hoyne Ave",
-            "FT_SEG_STR": 1,
-            "TF_SEG_STR": 1,
-            "FT_INT_STR": 1,
-            "TF_INT_STR": 1,
-            "FUNCTIONAL": "residential",
-            "SPEED_LIMI": 25,
-            "_coords": [(440100.0, 4640000.0), (440100.0, 4640100.0)],
-        },
-    ])
+    # Graph -> 2 edges (osm ways 111, 222), 3 nodes.
+    mock_build_graph.return_value = _make_graph()
+    # Mellow makes way 111 a protected path (tier 1); way 222 absent (tier 3).
+    mock_parse_mellow.return_value = [
+        MellowFeature(kind="path", way_ids=frozenset({"111"}), slug="p", name="Path"),
+    ]
+    mock_parse_cdot.return_value = []
 
     result = run_pipeline(
         config_path=cfg_path,
         cache_dir=cache_dir,
-        brokenspoke_results_dir=tmp_path / "brokenspoke_results",
         db_path=db_path,
         treatments_dir=treatments_dir,
         report_path=tmp_path / "prep_report.md",
@@ -158,21 +152,25 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     try:
         streets_count = conn.execute("SELECT COUNT(*) FROM streets").fetchone()[0]
         ints_count = conn.execute("SELECT COUNT(*) FROM intersections").fetchone()[0]
+        lts_values = [r[0] for r in conn.execute("SELECT lts FROM streets ORDER BY lts")]
         meta_rows = conn.execute("SELECT source FROM meta").fetchall()
         schema_meta = conn.execute("SELECT schema_version FROM schema_meta").fetchall()
     finally:
         conn.close()
 
-    assert streets_count == 2, f"expected 2 streets from fixture, got {streets_count}"
-    # 2 segments share one endpoint at (440100, 4640000): 3 unique intersection points total.
-    assert ints_count == 3, f"expected 3 synthesized intersections, got {ints_count}"
+    assert streets_count == 2, f"expected 2 streets from graph, got {streets_count}"
+    # 2 edges share node 11: 3 unique intersection nodes total.
+    assert ints_count == 3, f"expected 3 intersections, got {ints_count}"
+    # Mellow path on way 111 -> tier 1; way 222 unclassified -> tier 3.
+    assert lts_values == [1, 3], f"expected tiers [1, 3], got {lts_values}"
     meta_sources = {row[0] for row in meta_rows}
     assert "hin" in meta_sources
-    assert "cdot_bike_facilities" in meta_sources
     assert "chicago_speed_limits" in meta_sources
+    assert "mellow" in meta_sources
+    assert "cdot_facilities" in meta_sources
     assert "cdp_pois" in meta_sources
-    assert "brokenspoke" in meta_sources
     assert "osm_pois" in meta_sources
+    assert "brokenspoke" not in meta_sources
     assert len(schema_meta) == 1, "schema_meta must have exactly one row"
 
 
@@ -187,14 +185,6 @@ sources:
     segments_url: "https://example.com/seg"
     intersections_url: "https://example.com/int"
     refresh_cadence: "monthly"
-brokenspoke:
-  image: "test/img:1.0"
-  city_country: "united states"
-  city_name: "chicago"
-  city_state: "illinois"
-  city_fips: "1714000"
-  database_url: "postgresql://test"
-  network_name: "test_net"
 target:
   name: "Chicago"
   bbox:
@@ -223,90 +213,20 @@ def test_run_pipeline_failed_source_does_not_overwrite_existing_db(
     mock_hin.return_value.fetch.return_value = FetchResult(
         path=cache_dir, record_count=0, status="FAIL", warnings=["http 503"]
     )
+    mock_osm_pois.return_value.fetch.return_value = FetchResult(
+        path=cache_dir, record_count=0, status="OK", warnings=[]
+    )
 
     result = run_pipeline(
         config_path=cfg_path,
         cache_dir=cache_dir,
-        brokenspoke_results_dir=tmp_path / "brokenspoke_results",
         db_path=db_path,
         treatments_dir=tmp_path / "treatments",
         report_path=tmp_path / "prep_report.md",
-        skip_brokenspoke=True,
     )
 
     assert result.status == "FAIL"
     assert db_path.read_bytes() == b"PREVIOUS_DB_CONTENTS"
-
-
-@patch("prep.main.HinFetcher")
-@patch("prep.main.CdotBikewaysFetcher")
-@patch("prep.main.SpeedLimitsFetcher")
-@patch("prep.main.CdpPoisFetcher")
-@patch("prep.main.OsmPoisFetcher")
-def test_run_pipeline_consumes_preexisting_pfb_results_when_brokenspoke_skipped(
-    mock_osm: MagicMock,
-    mock_cdp: MagicMock,
-    mock_speed: MagicMock,
-    mock_cdot: MagicMock,
-    mock_hin: MagicMock,
-    tmp_path: Path,
-) -> None:
-    """When skip_brokenspoke=True, the orchestrator should resolve and ingest
-    a pre-existing PFB results directory at the conventional path."""
-    cfg_path = tmp_path / "sources.yaml"
-    _write_yaml_config(cfg_path)
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    db_path = tmp_path / "bikemap.db"
-    treatments_dir = tmp_path / "treatments"
-    treatments_dir.mkdir()
-
-    # Mimic PFB drop: place the shapefile at the conventional location.
-    results_dir = tmp_path / "brokenspoke_results" / "united-states" / "illinois" / "chicago" / "25.01"
-    results_dir.mkdir(parents=True)
-    _write_pfb_shapefile(results_dir / "neighborhood_ways.shp", [
-        {
-            "ROAD_ID": 1, "OSM_ID": 12345,
-            "INTERSECTI": 100, "INTERSE_01": 101,
-            "NAME": "W Foster Ave",
-            "FT_SEG_STR": 4, "TF_SEG_STR": 4,
-            "FT_INT_STR": 3, "TF_INT_STR": 3,
-            "FUNCTIONAL": "primary", "SPEED_LIMI": 30,
-            "_coords": [(440000.0, 4640000.0), (440100.0, 4640000.0)],
-        },
-    ])
-
-    def _ok(n: int) -> FetchResult:
-        return FetchResult(path=cache_dir, record_count=n, status="OK", warnings=[])
-
-    mock_hin.return_value.fetch.return_value = _ok(50)
-    mock_cdot.return_value.fetch.return_value = _ok(400)
-    mock_speed.return_value.fetch.return_value = _ok(200)
-    mock_cdp.return_value.fetch.return_value = _ok(60)
-    mock_osm.return_value.fetch.return_value = _ok(20)
-
-    result = run_pipeline(
-        config_path=cfg_path,
-        cache_dir=cache_dir,
-        brokenspoke_results_dir=tmp_path / "brokenspoke_results",
-        db_path=db_path,
-        treatments_dir=treatments_dir,
-        report_path=tmp_path / "prep_report.md",
-        skip_brokenspoke=True,
-    )
-
-    assert result.status == "OK"
-    assert db_path.exists()
-
-    import sqlite3 as _sql
-    conn = _sql.connect(db_path)
-    try:
-        streets = conn.execute("SELECT COUNT(*) FROM streets").fetchone()[0]
-        ints = conn.execute("SELECT COUNT(*) FROM intersections").fetchone()[0]
-    finally:
-        conn.close()
-    assert streets == 1
-    assert ints == 2  # 2 endpoints from a 1-segment fixture
 
 
 def test_hin_features_from_geojson_segments_use_cmap_field_names(

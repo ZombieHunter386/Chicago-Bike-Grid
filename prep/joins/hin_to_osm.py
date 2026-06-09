@@ -80,36 +80,43 @@ def _project(g: BaseGeometry) -> BaseGeometry:
     return transform(_TO_IL_EAST_M, g)
 
 
-def _bearing(line: LineString, near_point: Point | None = None) -> float:
-    """Return bearing in degrees of a (projected) LineString.
+def _bearing(line: BaseGeometry, near_point: Point | None = None) -> float:
+    """Return bearing in degrees of a (projected) line geometry.
+
+    Accepts a LineString or a multi-part line (MultiLineString) — CDOT
+    facilities in particular are sometimes digitized as MultiLineString, and
+    `LineString.coords` raises on multi-part geometries. We flatten every part
+    into its 2-point sub-segments and reason over that segment list.
 
     For curved or multi-segment lines, the start→end chord can be misleading.
-    If `near_point` is provided, returns the bearing of the line's
-    sub-segment closest to that point. Otherwise falls back to start→end.
+    If `near_point` is provided, returns the bearing of the sub-segment closest
+    to that point. Otherwise falls back to first-point→last-point.
 
     Bearings returned mod 180° (bidirectional — direction-independent for
-    matching against HIN features that may be digitized either way).
+    matching against features that may be digitized either way).
     """
-    coords = list(line.coords)
-    if len(coords) < 2:
+    parts = list(line.geoms) if hasattr(line, "geoms") else [line]
+    # Each segment is a ((x0, y0), (x1, y1)) pair drawn from any part.
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for part in parts:
+        coords = list(part.coords)
+        for i in range(len(coords) - 1):
+            segments.append((coords[i][:2], coords[i + 1][:2]))
+    if not segments:
         return 0.0
 
     if near_point is not None:
-        # Find the segment whose midpoint is closest to near_point.
-        best_idx = 0
-        best_dist = float("inf")
-        for i in range(len(coords) - 1):
-            mx = (coords[i][0] + coords[i + 1][0]) / 2
-            my = (coords[i][1] + coords[i + 1][1]) / 2
-            d = (mx - near_point.x) ** 2 + (my - near_point.y) ** 2
-            if d < best_dist:
-                best_dist = d
-                best_idx = i
-        x0, y0 = coords[best_idx][:2]
-        x1, y1 = coords[best_idx + 1][:2]
+        # Pick the segment whose midpoint is closest to near_point.
+        def _midpoint_dist(seg: tuple[tuple[float, float], tuple[float, float]]) -> float:
+            (ax, ay), (bx, by) = seg
+            mx, my = (ax + bx) / 2, (ay + by) / 2
+            return (mx - near_point.x) ** 2 + (my - near_point.y) ** 2
+
+        (x0, y0), (x1, y1) = min(segments, key=_midpoint_dist)
     else:
-        x0, y0 = coords[0][:2]
-        x1, y1 = coords[-1][:2]
+        # First point of the first part → last point of the last part.
+        x0, y0 = segments[0][0]
+        x1, y1 = segments[-1][1]
 
     return math.degrees(math.atan2(y1 - y0, x1 - x0)) % 180.0
 

@@ -69,7 +69,10 @@ So removing brokenspoke removes **the source of the graph topology**, not just t
 Build the base network from OpenStreetMap (the same substrate brokenspoke and Mellow both use), then attach a tier to each edge from Mellow + CDOT.
 
 - **Graph build**: extract the Chicago drivable/bikeable street network from an OSM extract within `target.bbox`, producing edges (LineString geometry, stable node IDs at each end) and nodes. Candidate tooling: `osmnx` (Python, simplest to integrate into the existing Python prep package and to unit-test) or `osm2pgrouting` (what Mellow uses; heavier, needs Postgres). **Recommendation: `osmnx`** — keeps the prep pipeline pure-Python, no new DB service, and emits exactly the node/edge model the `streets`/`intersections` schema already expects.
-- **Tier attach**: spatially match each OSM edge to (a) Mellow geometry and (b) CDOT facility geometry, mirroring the existing `prep/joins/hin_to_osm.py` buffer-match pattern. Apply the §1.1 rule.
+- **Tier attach** (revised 2026-06-09 against the live Mellow fixture):
+  - **Mellow** is matched by **OSM way-ID join, not geometry**. The `mbm.mellowroute` records carry no per-route LineString — each has a `type` (kind) and a `ways` list of OSM way IDs (plus only a coarse `bounding_box`). Build `way_id -> kind` (best/min tier on conflict) and match each OSM edge by its `osmid` (osmnx edges carry the OSM way id; simplified edges carry a *list*, so an edge is kind X if **any** of its osmids is in the kind-X set). Exact, and sidesteps buffer fuzz.
+  - **CDOT** is still matched **spatially** per edge, mirroring the existing `prep/joins/hin_to_osm.py` buffer-match pattern.
+  - Apply the §1.1 rule (Mellow baseline → CDOT override → path floor).
 - **Intersections**: `lts_approach` no longer exists as a PFB output. v1 rule: an intersection node's `lts_approach` = max (worst) tier of its incident edges. Keeps the schema NOT NULL constraint satisfied and the `/explore` intersection layer meaningful.
 
 ### 2.2 What this preserves
@@ -135,7 +138,7 @@ cdot_off_street_trails:
 - Unit: Mellow fixture parser (route/street/path → geometry + kind).
 - Unit: CDOT facility-type → tier mapping (each facility-type string).
 - Unit: intersection `lts_approach` = max incident edge.
-- Unit: OSM→Mellow and OSM→CDOT spatial match (fixture-based, mirrors `test_hin_to_osm.py`).
+- Unit: OSM→Mellow **way-ID join** (dict lookup over edge osmids) and OSM→CDOT **spatial** match (fixture-based, mirrors `test_hin_to_osm.py`).
 - Integration: small bbox end-to-end build → assert `streets.lts` distribution is sane and graph is connected.
 - Regression: existing app/router tests stay green (schema unchanged).
 
