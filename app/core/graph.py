@@ -62,9 +62,9 @@ class GraphSnapshot:
     # PFB int_id → vertex idx lookup is a sorted parallel-array pair queried
     # via `vertex_for_int_id()`; replaces the prior dict to save ~25 MB on
     # the 350k-vertex Chicago graph.
-    osm_id_sorted: np.ndarray                     # shape (V,) int32, sorted ascending (PFB int_id max ~710k)
+    osm_id_sorted: np.ndarray                     # shape (V,) int64, sorted ascending (raw OSM node ids, > 13B)
     osm_id_to_vertex_idx: np.ndarray              # shape (V,) int32, aligned to osm_id_sorted (values < V)
-    vertex_to_int_id: np.ndarray                  # shape (V,) int32 (PFB int_id max ~710k)
+    vertex_to_int_id: np.ndarray                  # shape (V,) int64 (raw OSM node ids — exceed int32)
     vertex_coords_wgs84: np.ndarray               # shape (V, 2) float64, columns [lat, lon]
     vertex_coords_proj: np.ndarray                # shape (V, 2) EPSG:6454 metres
     vertex_kdtree: cKDTree
@@ -85,8 +85,8 @@ class GraphSnapshot:
     road_on_hin_array: np.ndarray                 # shape (R,) bool
     road_highway_list: list[str | None]           # length R
     road_name_list: list[str | None]              # length R; OSM `name` tag, surfaced by gap analysis for human-readable callouts
-    road_head_int_id_array: np.ndarray            # shape (R,) int32 (PFB int_id max ~710k)
-    road_tail_int_id_array: np.ndarray            # shape (R,) int32 (PFB int_id max ~710k)
+    road_head_int_id_array: np.ndarray            # shape (R,) int64 (raw OSM node ids — exceed int32)
+    road_tail_int_id_array: np.ndarray            # shape (R,) int64 (raw OSM node ids — exceed int32)
     road_bbox_proj: np.ndarray                    # shape (R, 4) — minx, miny, maxx, maxy
     road_endpoints_proj: np.ndarray               # shape (R, 4) — head_x, head_y, tail_x, tail_y
 
@@ -136,7 +136,9 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     # to the sorted-parallel-array layout (~25 MB savings vs keeping the
     # dict in the dataclass) once construction is done.
     int_id_to_vertex: dict[int, int] = {}
-    vertex_to_int_id_arr = np.empty(n_vertices, dtype=np.int32)
+    # int64: holds raw OSM node IDs, which exceed int32 (Chicago nodes are
+    # > 13 billion). int32 here crashed full-city worker boot.
+    vertex_to_int_id_arr = np.empty(n_vertices, dtype=np.int64)
     coords_wgs84_arr = np.empty((n_vertices, 2), dtype=np.float64)
     coords_proj = np.empty((n_vertices, 2), dtype=np.float64)
     vertex_lts_approach = np.empty(n_vertices, dtype=np.int8)
@@ -300,8 +302,8 @@ def load_graph(db_path: Path) -> GraphSnapshot:
         road_on_hin_array=np.asarray(road_on_hin, dtype=bool),
         road_highway_list=road_highways,
         road_name_list=road_names,
-        road_head_int_id_array=np.asarray(road_heads, dtype=np.int32),
-        road_tail_int_id_array=np.asarray(road_tails, dtype=np.int32),
+        road_head_int_id_array=np.asarray(road_heads, dtype=np.int64),
+        road_tail_int_id_array=np.asarray(road_tails, dtype=np.int64),
         road_bbox_proj=np.asarray(bboxes, dtype=np.float64).reshape(n_roads, 4) if n_roads else np.empty((0, 4)),
         road_endpoints_proj=np.asarray(endpoints, dtype=np.float64).reshape(n_roads, 4) if n_roads else np.empty((0, 4)),
     )

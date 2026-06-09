@@ -8,6 +8,50 @@ from app.core.graph import (
     nearest_vertex,
     vertex_for_int_id,
 )
+from prep.db.builder import DbBuilder
+from prep.lts.ingest import IntersectionRecord, SegmentRecord
+
+
+def test_load_graph_handles_osm_scale_node_ids(tmp_path: Path) -> None:
+    """OSM node IDs exceed int32. Chicago has nodes well above 13 billion;
+    the original loader stored them in int32 arrays sized for PFB's ~710k
+    internal IDs. Regression: the full-city build crashed worker boot with
+    "Python integer 2149670613 out of bounds for int32" — node id 2.1B+
+    overflowed int32 at load time. The loader must use int64 for node IDs.
+    """
+    big_a = 13_923_361_677  # > int32 max (2,147,483,647); real Chicago scale
+    big_b = 2_149_670_613   # the exact value from the crash report
+    db_path = tmp_path / "bikemap.db"
+    builder = DbBuilder(db_path)
+    builder.create_schema()
+    builder.insert_intersections([
+        IntersectionRecord(osm_id=big_a, lts_approach=1, signalized=None,
+                           lanes_crossed=None, geometry_wkt="POINT (-87.680 41.940)",
+                           raw_properties={}),
+        IntersectionRecord(osm_id=big_b, lts_approach=1, signalized=None,
+                           lanes_crossed=None, geometry_wkt="POINT (-87.675 41.940)",
+                           raw_properties={}),
+    ])
+    builder.insert_streets([
+        SegmentRecord(road_id=1, osm_id=1001, head_int_id=big_a, tail_int_id=big_b,
+                      name="Big St", lts=1, highway="residential", speed=25,
+                      ft_int_str=1, tf_int_str=1,
+                      geometry_wkt="LINESTRING(-87.680 41.940, -87.675 41.940)",
+                      raw_properties={}),
+    ])
+    builder.record_schema_meta(code_version="test")
+    builder.close()
+
+    snap = load_graph(db_path)
+    # Node IDs round-trip without overflow.
+    va = vertex_for_int_id(snap, big_a)
+    vb = vertex_for_int_id(snap, big_b)
+    assert va is not None and vb is not None
+    assert int(snap.vertex_to_int_id[va]) == big_a
+    assert int(snap.vertex_to_int_id[vb]) == big_b
+    # Per-road head/tail node-id arrays preserve the full value.
+    assert big_a in {int(x) for x in snap.road_head_int_id_array}
+    assert big_b in {int(x) for x in snap.road_tail_int_id_array}
 
 
 def test_load_graph_creates_directed_graph(tiny_bikemap_db: Path) -> None:
