@@ -43,6 +43,7 @@ from prep.graph.osm_builder import (
     build_graph_from_bbox,
     build_nodes,
     build_street_edges,
+    prune_to_routable_network,
 )
 from prep.joins.hin_to_osm import (
     HinIntersectionFeature,
@@ -325,7 +326,11 @@ def run_pipeline(
         builder.create_schema()
 
         # Topology from OSM (osmnx); tier from Mellow (baseline) + CDOT (override).
-        graph = build_graph_from_bbox(cfg.target.bbox)
+        # Prune to the routable network *after* osmnx's build: removing service
+        # roads (alleys) orphans the intersections that only touched them, so we
+        # re-take the largest weakly-connected component to drop those dead
+        # vertices (otherwise nearest_vertex can snap onto an unroutable node).
+        graph = prune_to_routable_network(build_graph_from_bbox(cfg.target.bbox))
         edges = list(build_street_edges(graph))
         nodes = list(build_nodes(graph))
 

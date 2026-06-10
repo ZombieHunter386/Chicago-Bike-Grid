@@ -67,3 +67,20 @@ def test_parse_mellow_features_path_way_ids(fixtures_dir: Path) -> None:
     assert path.kind == "path"
     assert path.way_ids == frozenset({"23754638", "23810295"})
     assert path.name == "Lakefront Trail"
+
+
+def test_parse_mellow_features_decodes_json_encoded_ways(fixtures_dir: Path) -> None:
+    """Regression: the real GitHub fixture stores `ways` as a JSON-*encoded
+    string* (e.g. '["4476714", "4476717"]'), not a native JSON list. The original
+    parser iterated the string directly, yielding individual characters ('[',
+    '"', '4', ...) instead of way ids — so the full-city Mellow join matched only
+    ~15 character fragments and ~95% of streets fell through to tier 3. The
+    parser must json.loads the string before building way_ids.
+    """
+    by_slug = {f.slug: f for f in parse_mellow_features(fixtures_dir / "mellowroute_sample.json")}
+
+    loop = by_slug["loop"]
+    # Real way ids, not single characters.
+    assert loop.way_ids == frozenset({"4476714", "4476717", "4477283"})
+    # No single-character fragments leaked through.
+    assert all(len(w) > 1 for w in loop.way_ids)

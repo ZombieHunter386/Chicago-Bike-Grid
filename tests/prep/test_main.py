@@ -22,7 +22,7 @@ def _make_graph() -> nx.MultiDiGraph:
         geometry=LineString([(-87.680, 41.940), (-87.670, 41.940)]),
     )
     g.add_edge(
-        11, 12, osmid=222, name="N Hoyne Ave", highway="residential", length=100.0,
+        11, 12, osmid=222, name="N Hoyne Ave", highway="primary", length=100.0,
         geometry=LineString([(-87.670, 41.940), (-87.670, 41.950)]),
     )
     return g
@@ -126,7 +126,8 @@ def test_run_pipeline_happy_path_writes_db_and_report(
 
     # Graph -> 2 edges (osm ways 111, 222), 3 nodes.
     mock_build_graph.return_value = _make_graph()
-    # Mellow makes way 111 a protected path (tier 1); way 222 absent (tier 3).
+    # Mellow makes way 111 a protected path (tier 1); way 222 is absent from
+    # Mellow and an arterial (highway=primary) -> road-class baseline tier 3.
     mock_parse_mellow.return_value = [
         MellowFeature(kind="path", way_ids=frozenset({"111"}), slug="p", name="Path"),
     ]
@@ -161,7 +162,7 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     assert streets_count == 2, f"expected 2 streets from graph, got {streets_count}"
     # 2 edges share node 11: 3 unique intersection nodes total.
     assert ints_count == 3, f"expected 3 intersections, got {ints_count}"
-    # Mellow path on way 111 -> tier 1; way 222 unclassified -> tier 3.
+    # Mellow path on way 111 -> tier 1; way 222 (primary, no Mellow) -> tier 3.
     assert lts_values == [1, 3], f"expected tiers [1, 3], got {lts_values}"
     meta_sources = {row[0] for row in meta_rows}
     assert "hin" in meta_sources

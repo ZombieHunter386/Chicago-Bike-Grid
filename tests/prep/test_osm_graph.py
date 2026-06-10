@@ -19,6 +19,7 @@ from prep.graph.osm_builder import (
     build_graph_from_bbox,
     build_nodes,
     build_street_edges,
+    prune_to_routable_network,
 )
 
 
@@ -115,6 +116,50 @@ def test_build_street_edges_collapses_osmid_list(tiny_graph: nx.MultiDiGraph) ->
 def test_build_street_edges_collapses_name_list(tiny_graph: nx.MultiDiGraph) -> None:
     by_pair = {frozenset((e.head_node_id, e.tail_node_id)): e for e in build_street_edges(tiny_graph)}
     assert by_pair[frozenset((4, 1))].name == "C St"  # first of the list
+
+
+def test_prune_to_routable_network_drops_orphans_and_islands() -> None:
+    """Regression: dropping service roads left ~79k intersections that only
+    touched alleys as isolated vertices, plus small disconnected islands. They
+    stayed in the DB and `nearest_vertex` could snap a home/dest to one, so
+    routing returned no path ("sometimes no routes"). Pruning to the largest
+    weakly-connected component (after removing service edges) must drop both the
+    service-only orphans AND the islands, leaving one fully-routable graph."""
+    g = nx.MultiDiGraph()
+    g.graph["crs"] = "epsg:4326"
+    # Main routable component: 1-2-3 (residential)
+    for n, (x, y) in {1: (-87.68, 41.94), 2: (-87.67, 41.94), 3: (-87.67, 41.95)}.items():
+        g.add_node(n, x=x, y=y)
+    g.add_edge(1, 2, osmid=10, highway="residential", length=100.0)
+    g.add_edge(2, 3, osmid=11, highway="residential", length=100.0)
+    # Node 4 reachable ONLY via a service road (alley) -> orphaned once service drops.
+    g.add_node(4, x=-87.69, y=41.94)
+    g.add_edge(1, 4, osmid=12, highway="service", length=50.0)
+    # Disconnected island 5-6 (residential but unreachable from the main grid).
+    g.add_node(5, x=-87.60, y=41.99)
+    g.add_node(6, x=-87.60, y=41.991)
+    g.add_edge(5, 6, osmid=13, highway="residential", length=80.0)
+
+    pruned = prune_to_routable_network(g)
+
+    node_ids = {n.node_id for n in build_nodes(pruned)}
+    assert node_ids == {1, 2, 3}  # service-only orphan (4) and island (5,6) dropped
+    assert nx.is_weakly_connected(pruned)  # single routable component, no isolated vertices
+    # No service edges survive.
+    assert all(e.highway != "service" for e in build_street_edges(pruned))
+
+
+def test_build_street_edges_drops_service_roads(tiny_graph: nx.MultiDiGraph) -> None:
+    """Service roads (alleys, driveways, parking aisles) are excluded from the
+    network. Mellow ignores them entirely and they aren't useful bike routes;
+    left in, they dominated the map as tier-3 clutter (~half of all streets)."""
+    tiny_graph.add_node(5, x=-87.69, y=41.94)
+    tiny_graph.add_edge(1, 5, osmid=500, highway="service", name="Alley", length=100.0)
+    edges = list(build_street_edges(tiny_graph))
+    assert all(e.highway != "service" for e in edges)
+    assert 500 not in {e.osm_id for e in edges}
+    # the four real streets remain
+    assert len(edges) == 4
 
 
 def test_build_street_edges_dedupes_reverse_direction(tiny_graph: nx.MultiDiGraph) -> None:

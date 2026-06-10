@@ -61,27 +61,12 @@ def export_lts_network(db_path: Path, output_path: Path) -> int:
                     first = False
                 f.write(json.dumps(feature, separators=(",", ":")))
 
-            for r in con.execute(
-                "SELECT lts_approach, on_hin, geom FROM intersections"
-            ):
-                pt = wkb.loads(r["geom"])
-                feature = {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Point",
-                        "coordinates": _round_coord((pt.x, pt.y)),
-                    },
-                    "properties": {
-                        "lts_approach": int(r["lts_approach"]),
-                        "on_hin": bool(r["on_hin"]),
-                    },
-                }
-                if not first:
-                    f.write(",")
-                else:
-                    first = False
-                f.write(json.dumps(feature, separators=(",", ":")))
-
+            # Intersection points are intentionally NOT exported. In the full
+            # city they were ~203k Point features — roughly a third of the
+            # /explore payload — yet ~99% shared lts_approach=3, rendering as a
+            # uniform red haze that bloated the download and made the map look
+            # broken rather than conveying signal. Dropping them is the quick
+            # payload reduction for the slow Explorer load.
             f.write("]}")
     finally:
         con.close()
