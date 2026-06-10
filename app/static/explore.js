@@ -54,8 +54,8 @@ function isOfmBasemapToHide(layer) {
   if (!layer) return false;
   if (layer.id === "background") return true;
   if (layer.id === ESRI_IMAGERY_LYR) return false;
-  // Skip our custom layers — LTS streets, intersections, HIN.
-  if (layer.id === "streets-layer" || layer.id === "intersections-layer" || layer.id === "hin-layer") return false;
+  // Skip our custom layers — LTS streets, HIN.
+  if (layer.id === "streets-layer" || layer.id === "hin-layer") return false;
   return layer.type === "fill" || layer.type === "line";
 }
 
@@ -80,7 +80,6 @@ toggleBtn.addEventListener("click", () => {
 
 // Module-scope cache so basemap toggle can re-add layers without re-fetching.
 let streetsFC = null;
-let intersectionsFC = null;
 let hinFC = null;
 
 const LTS_COLOR_EXPR = [
@@ -91,17 +90,9 @@ const LTS_COLOR_EXPR = [
   3, "#dc2626",
   "#999999",
 ];
-const LTS_APPROACH_COLOR_EXPR = [
-  "match",
-  ["get", "lts_approach"],
-  1, "#16a34a",
-  2, "#f59e0b",
-  3, "#dc2626",
-  "#999999",
-];
 
 function addLayers() {
-  if (!streetsFC || !intersectionsFC || !hinFC) return;
+  if (!streetsFC || !hinFC) return;
 
   if (!map.getSource("hin-source")) {
     map.addSource("hin-source", { type: "geojson", data: hinFC });
@@ -133,25 +124,6 @@ function addLayers() {
       paint: { "line-color": LTS_COLOR_EXPR, "line-width": 2 },
     });
   }
-
-  if (!map.getSource("intersections-source")) {
-    map.addSource("intersections-source", { type: "geojson", data: intersectionsFC });
-    map.addLayer({
-      id: "intersections-layer",
-      type: "circle",
-      source: "intersections-source",
-      paint: {
-        "circle-color": LTS_APPROACH_COLOR_EXPR,
-        "circle-radius": [
-          "interpolate", ["linear"], ["zoom"],
-          11, 2,
-          14, 5,
-        ],
-        "circle-stroke-color": "#ffffff",
-        "circle-stroke-width": 0.5,
-      },
-    });
-  }
 }
 
 async function loadNetwork() {
@@ -165,10 +137,6 @@ async function loadNetwork() {
   streetsFC = {
     type: "FeatureCollection",
     features: fc.features.filter((f) => f.geometry.type === "LineString"),
-  };
-  intersectionsFC = {
-    type: "FeatureCollection",
-    features: fc.features.filter((f) => f.geometry.type === "Point"),
   };
   hinFC = {
     type: "FeatureCollection",
@@ -205,11 +173,9 @@ async function init() {
     await Promise.all([loadNetwork(), styleReady]);
     addLayers();
     applyInitialHin();
-    applyIntersectionVisibility(intersectionsCheckbox.checked);
     applyLtsVisibility(ltsCheckbox.checked);
     document.getElementById("legend").hidden = false;
     document.getElementById("hin-toggle").hidden = false;
-    document.getElementById("intersections-toggle").hidden = false;
     document.getElementById("lts-toggle").hidden = false;
     toggleBtn.disabled = false;
     toggleBtn.textContent = "Satellite";
@@ -232,20 +198,6 @@ init();
 // (Basemap swap re-add is wired inside the toggleBtn click handler via
 //  map.once("style.load", ...) — see comment there for the reason a
 //  permanent map.on(...) listener didn't work.)
-
-// Intersection-layer toggle. Defaults to "on" because the layer was always
-// visible before this control existed; users who want to inspect only the
-// street stress without the intersection clutter can untick it.
-const intersectionsCheckbox = document.getElementById("intersections-checkbox");
-
-function applyIntersectionVisibility(checked) {
-  if (!map.getLayer("intersections-layer")) return;
-  map.setLayoutProperty("intersections-layer", "visibility", checked ? "visible" : "none");
-}
-
-intersectionsCheckbox.addEventListener("change", () => {
-  applyIntersectionVisibility(intersectionsCheckbox.checked);
-});
 
 // LTS-network-layer toggle. Defaults to "on" — the LTS streets are the
 // main /explore artifact. Lets the user untick to see ONLY the HIN

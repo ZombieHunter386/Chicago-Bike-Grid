@@ -1,5 +1,5 @@
 """Tests for /geocode proxy."""
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 def _make_app():
@@ -75,6 +75,30 @@ def test_geocode_suggest_short_query_returns_empty_without_calling_nominatim() -
         assert resp.status_code == 200
         assert resp.get_json() == {"results": []}
         mock_fetch.assert_not_called()
+
+
+def test_fetch_nominatim_bounds_results_to_chicago() -> None:
+    """Prefilled suggestions must be Chicago-only: the user reported the search
+    bar offering addresses from all over the US. `_fetch_nominatim` must pass a
+    Chicago `viewbox` and `bounded=1` so Nominatim restricts results to the
+    metro bounding box instead of the whole country.
+    """
+    from app.routes import geocode
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = []
+    mock_resp.raise_for_status.return_value = None
+    with patch("app.routes.geocode.requests.get", return_value=mock_resp) as mock_get:
+        geocode._fetch_nominatim("Foster Ave", "test/1.0", limit=5)
+
+    params = mock_get.call_args.kwargs["params"]
+    assert params["bounded"] == "1"
+    assert "viewbox" in params
+    # viewbox is "left,top,right,bottom" — four comma-separated floats covering
+    # the Chicago metro. Sanity-check the longitudes/latitudes are in range.
+    left, top, right, bottom = (float(x) for x in params["viewbox"].split(","))
+    assert -88.0 < left < -87.5 and -88.0 < right < -87.5
+    assert 41.6 < bottom < 42.1 and 41.6 < top < 42.1
 
 
 def test_geocode_suggest_skips_malformed_nominatim_rows() -> None:
