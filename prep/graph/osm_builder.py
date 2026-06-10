@@ -58,6 +58,12 @@ def bbox_to_osmnx(
     return (min_lng, min_lat, max_lng, max_lat)
 
 
+# OSM highway classes excluded from the routable/displayed network. `service`
+# covers alleys, driveways, and parking aisles — not useful bike routes, and
+# Mellow ignores them entirely.
+_EXCLUDED_HIGHWAYS = frozenset({"service"})
+
+
 def _first(value: Any) -> Any:
     """osmnx attrs can be a scalar or a list; return the first scalar."""
     if isinstance(value, list):
@@ -98,6 +104,32 @@ def build_graph_from_bbox(
     )
 
 
+def prune_to_routable_network(graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    """Return a routable subgraph: drop excluded-highway edges, then keep only
+    the largest weakly-connected component.
+
+    osmnx's ``graph_from_bbox(retain_all=False)`` already returns the largest
+    component, but that's computed *with* service roads still present. Once we
+    remove service roads (alleys/driveways), the ~intersections that only touched
+    them become isolated vertices, and a few areas split into small islands. Left
+    in, those dead vertices stay in the DB and ``nearest_vertex`` can snap a
+    home/dest onto one, so routing finds no path ("sometimes no routes"). Taking
+    the largest weakly-connected component *after* the removal drops both the
+    isolated orphans and the islands in one step, leaving a fully-routable graph.
+    """
+    g = graph.copy()
+    to_remove = [
+        (u, v, k)
+        for u, v, k, data in g.edges(keys=True, data=True)
+        if _first(data.get("highway")) in _EXCLUDED_HIGHWAYS
+    ]
+    g.remove_edges_from(to_remove)
+    if g.number_of_nodes() == 0:
+        return g
+    largest = max(nx.weakly_connected_components(g), key=len)
+    return g.subgraph(largest).copy()
+
+
 def build_nodes(graph: nx.MultiDiGraph) -> Iterator[OsmNode]:
     """Yield an OsmNode per graph node (x = lng, y = lat)."""
     for node_id, data in graph.nodes(data=True):
@@ -111,10 +143,16 @@ def build_street_edges(graph: nx.MultiDiGraph) -> Iterator[OsmEdge]:
     A MultiDiGraph carries both directions of a two-way street; we collapse them
     to a single record keyed on (unordered node pair, osm_id). road_id is a
     monotonic counter (stable for a given deterministic graph build).
+
+    Service roads (``highway=service`` — alleys, driveways, parking aisles) are
+    skipped: Mellow ignores them entirely, they aren't useful bike routes, and
+    left in they make up ~half of all OSM ways, dominating the map as clutter.
     """
     road_id = 0
     seen: set[tuple[frozenset[int], int]] = set()
     for u, v, data in graph.edges(data=True):
+        if _first(data.get("highway")) in _EXCLUDED_HIGHWAYS:
+            continue
         osmid = data.get("osmid")
         osm_id = int(_first(osmid))
         key = (frozenset((int(u), int(v))), osm_id)

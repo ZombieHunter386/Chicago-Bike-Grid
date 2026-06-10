@@ -126,7 +126,7 @@ def classify_network(
     for edge in edges:
         mellow_kind = _mellow_kind_for_edge(edge, way_kind)
         cdot_tier = cdot_tiers.get(edge.road_id)
-        lts = combine_final_tier(mellow_kind, cdot_tier)
+        lts = combine_final_tier(mellow_kind, cdot_tier, edge.highway)
         records.append(
             SegmentRecord(
                 road_id=edge.road_id,

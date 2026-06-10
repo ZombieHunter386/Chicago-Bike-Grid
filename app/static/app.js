@@ -635,9 +635,36 @@ function scheduleGapAnalysis() {
     // corridor: when fast == safe (already on safe streets) or savings
     // below threshold. We say so out loud and auto-hide after 5s.
     if (failures.length === 0 && !corridorGeo && intersectionAgg.length === 0) {
-      gapLoadingText.textContent =
-        "No corridor to fix on this trip — the fast route is already safe at this tier.";
-      setTimeout(() => { if (gapLoading) gapLoading.hidden = true; }, 5000);
+      // Three situations produce an empty corridor; saying "already safe" for
+      // all of them is the bug the user hit. Distinguish by the safe route's
+      // ACTUAL tier composition, not just the fallback flag:
+      //   - not a fallback        -> genuinely already safe
+      //   - fallback WITH red     -> couldn't avoid high-stress streets
+      //   - fallback, no red      -> couldn't stay on the very safest streets,
+      //                              but the route is still all calm/moderate
+      //                              (e.g. a kid route of {1:66, 2:8}). Telling
+      //                              this user the route "uses high-stress
+      //                              streets" is false and scares them off.
+      const fallbacks = [...perPairResults.values()].filter(
+        (r) => r && r.safe_route_is_fallback,
+      );
+      const fallbackHasRed = fallbacks.some((r) => {
+        const dist = r.safe_route && r.safe_route.lts_distribution;
+        return dist && Number(dist["3"]) > 0;
+      });
+      let emptyMsg;
+      if (fallbacks.length === 0) {
+        emptyMsg =
+          "No corridor to fix on this trip — the fast route is already safe at this tier.";
+      } else if (fallbackHasRed) {
+        emptyMsg =
+          "The calmest route for this trip still uses some high-stress streets — it couldn't avoid them entirely.";
+      } else {
+        emptyMsg =
+          "This trip can't stay entirely on the safest streets, but the route shown sticks to calm and moderate ones — no high-stress streets at all.";
+      }
+      gapLoadingText.textContent = emptyMsg;
+      setTimeout(() => { if (gapLoading) gapLoading.hidden = true; }, 6000);
     } else {
       gapLoading.hidden = true;
     }

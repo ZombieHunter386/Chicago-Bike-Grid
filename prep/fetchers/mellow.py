@@ -87,9 +87,15 @@ def parse_mellow_features(path: Path) -> Iterator[MellowFeature]:
         if rec.get("model") != "mbm.mellowroute":
             continue
         fields = rec.get("fields", {})
+        # The real GitHub fixture stores `ways` as a JSON-*encoded string*
+        # (e.g. '["4476714", "4476717"]'), not a native list. Decode it first;
+        # iterating the raw string would yield single characters, not way ids.
+        ways = fields.get("ways", [])
+        if isinstance(ways, str):
+            ways = json.loads(ways)
         yield MellowFeature(
             kind=fields["type"],
-            way_ids=frozenset(str(w) for w in fields.get("ways", [])),
+            way_ids=frozenset(str(w) for w in ways),
             slug=fields.get("slug", ""),
             name=fields.get("name", ""),
         )

@@ -14,6 +14,12 @@ from flask import Blueprint, jsonify, request
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 MIN_INTERVAL_S = 1.1  # Nominatim TOS
 
+# Chicago metro bounding box, as Nominatim's "viewbox" = left,top,right,bottom
+# (min_lng, max_lat, max_lng, min_lat). Combined with bounded=1, Nominatim
+# restricts results to this box so prefilled suggestions stay Chicago-only
+# instead of returning same-named streets from across the US.
+_CHICAGO_VIEWBOX = "-87.9402,42.0230,-87.5240,41.6440"
+
 _throttle_lock = threading.Lock()
 _last_request_at = [0.0]
 
@@ -27,7 +33,14 @@ def _fetch_nominatim(address: str, user_agent: str, limit: int = 1) -> list[dict
         _last_request_at[0] = time.monotonic()
     resp = requests.get(
         NOMINATIM_URL,
-        params={"q": address, "format": "json", "limit": str(limit), "countrycodes": "us"},
+        params={
+            "q": address,
+            "format": "json",
+            "limit": str(limit),
+            "countrycodes": "us",
+            "viewbox": _CHICAGO_VIEWBOX,
+            "bounded": "1",
+        },
         headers={"User-Agent": user_agent},
         timeout=8,
     )

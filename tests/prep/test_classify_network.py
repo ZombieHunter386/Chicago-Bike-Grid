@@ -15,7 +15,12 @@ from prep.lts.ingest import SegmentRecord
 from prep.scoring.classify_network import classify_network
 
 
-def _edge(road_id: int, way_ids: tuple[str, ...], coords: list[tuple[float, float]]) -> OsmEdge:
+def _edge(
+    road_id: int,
+    way_ids: tuple[str, ...],
+    coords: list[tuple[float, float]],
+    highway: str = "residential",
+) -> OsmEdge:
     line = LineString(coords)
     return OsmEdge(
         road_id=road_id,
@@ -24,7 +29,7 @@ def _edge(road_id: int, way_ids: tuple[str, ...], coords: list[tuple[float, floa
         head_node_id=road_id * 10,
         tail_node_id=road_id * 10 + 1,
         name=f"Edge {road_id}",
-        highway="residential",
+        highway=highway,
         length_m=line.length,
         geometry_wkt=line.wkt,
     )
@@ -40,13 +45,13 @@ def _cdot(facility_type: str | None, coords: list[tuple[float, float]], *, off_s
 
 # East-west edges spaced ~111m apart in latitude so buffers never overlap neighbors.
 EDGES = [
-    _edge(1, ("100",), [(-87.6800, 41.9400), (-87.6750, 41.9400)]),  # mellow street, no CDOT -> 2
-    _edge(2, ("999",), [(-87.6800, 41.9460), (-87.6750, 41.9460)]),  # neither -> 3
+    _edge(1, ("100",), [(-87.6800, 41.9400), (-87.6750, 41.9400)]),  # mellow street, no CDOT -> 1 (calm green)
+    _edge(2, ("999",), [(-87.6800, 41.9460), (-87.6750, 41.9460)], "primary"),  # neither; arterial road class -> 3
     _edge(3, ("888",), [(-87.6800, 41.9410), (-87.6750, 41.9410)]),  # CDOT PROTECTED -> 1
     _edge(4, ("200",), [(-87.6800, 41.9420), (-87.6750, 41.9420)]),  # mellow street + CDOT SHARED -> 3
     _edge(5, ("900",), [(-87.6800, 41.9430), (-87.6750, 41.9430)]),  # mellow PATH + CDOT SHARED -> 1 (floor)
     _edge(6, ("777",), [(-87.6800, 41.9440), (-87.6750, 41.9440)]),  # off-street trail (perp) -> 1
-    _edge(7, ("666",), [(-87.6800, 41.9450), (-87.6750, 41.9450)]),  # CDOT BUFFERED perpendicular -> no match -> 3
+    _edge(7, ("666",), [(-87.6800, 41.9450), (-87.6750, 41.9450)], "secondary"),  # BUFFERED perp -> no match; arterial -> 3
 ]
 
 MELLOW = [
@@ -75,13 +80,26 @@ def _tiers() -> dict[int, int]:
 
 def test_classify_network_tiers() -> None:
     tiers = _tiers()
-    assert tiers == {1: 2, 2: 3, 3: 1, 4: 3, 5: 1, 6: 1, 7: 3}
+    assert tiers == {1: 1, 2: 3, 3: 1, 4: 3, 5: 1, 6: 1, 7: 3}
 
 
 def test_classify_network_path_floor_end_to_end() -> None:
     # edge 5 is a Mellow path overlapped by a CDOT SHARED (tier-3) facility;
     # the path floor keeps it tier 1.
     assert _tiers()[5] == 1
+
+
+def test_classify_network_road_class_baseline() -> None:
+    """An edge in neither Mellow nor CDOT is classified by its OSM road class:
+    a quiet residential street is tier 1 (not the old tier-3 default), while an
+    arterial is tier 3."""
+    edges = [
+        _edge(1, ("1",), [(-87.68, 41.95), (-87.675, 41.95)], "residential"),
+        _edge(2, ("2",), [(-87.68, 41.96), (-87.675, 41.96)], "secondary"),
+        _edge(3, ("3",), [(-87.68, 41.97), (-87.675, 41.97)], "tertiary"),
+    ]
+    tiers = {r.road_id: r.lts for r in classify_network(edges, [], [])}
+    assert tiers == {1: 1, 2: 3, 3: 2}
 
 
 def test_classify_network_handles_multilinestring_facility() -> None:

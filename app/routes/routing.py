@@ -27,16 +27,32 @@ def _route_to_payload(snap: GraphSnapshot, r: Route | None) -> dict | None:
          "lon": float(snap.vertex_coords_wgs84[v][1])}
         for v in r.vertex_path
     ]
-    # polyline_lts[i] is the effective LTS of the segment connecting
+    # polyline_lts[i] is the STREET-segment LTS of the segment connecting
     # polyline[i] → polyline[i+1]. Length is len(polyline) - 1. Frontend
-    # uses this to color the safe route green-on-tier / amber-off-tier
-    # per segment (per spec §2.2).
+    # uses this to color the route green/orange/red per segment by the
+    # street's own stress (per spec §2.2).
+    #
+    # danger_intersections lists only the crossings where the route must cross
+    # an UNSAFE (LTS-3) street it does NOT itself ride — i.e. dangerous cross
+    # traffic (vertex_cross_lts >= 3). The frontend drops a marker AT the node.
+    # A node is NOT flagged merely because its approach tier is high or because
+    # the route's own segment there is stressful: the route's own stress is shown
+    # by coloring the line, so a calm pass-through of a busy intersection stays
+    # unmarked unless a stressful street actually crosses there.
+    danger = [
+        {"lat": float(snap.vertex_coords_wgs84[v][0]),
+         "lon": float(snap.vertex_coords_wgs84[v][1]),
+         "lts": int(lts)}
+        for v, lts in zip(r.vertex_path, r.vertex_cross_lts, strict=True)
+        if lts >= 3
+    ]
     return {
         "polyline": polyline,
         "polyline_lts": list(r.edge_lts),
         "length_m": r.length_m,
         "is_fallback": r.is_fallback,
         "lts_distribution": r.lts_distribution,
+        "danger_intersections": danger,
     }
 
 
