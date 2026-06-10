@@ -145,6 +145,12 @@ const routeLayers = new Set();
 
 function routeSourceId(destId, kind) { return `route-${destId}-${kind}-src`; }
 function routeLayerId(destId, kind) { return `route-${destId}-${kind}-lyr`; }
+// Dangerous-intersection marker layer tied to a route (same destId/kind
+// lifecycle as the line, but NOT tracked in `routeLayers` — removeRouteLayer
+// tears it down alongside the line, so the prune/​wipe loops that iterate
+// `routeLayers` by regex never see these ids).
+function routeDangerSourceId(destId, kind) { return `route-${destId}-${kind}-danger-src`; }
+function routeDangerLayerId(destId, kind) { return `route-${destId}-${kind}-danger-lyr`; }
 
 // Build GeoJSON for a route polyline. The endpoints are clipped to the
 // user's home and destination markers (the polyline's first/last vertices
@@ -258,6 +264,41 @@ function ensureRouteLayer(map, destId, kind, route, home, dest) {
     metadata: { destId, kind, isFallback: !!route.is_fallback },
   });
   routeLayers.add(lyrId);
+
+  // Dangerous-intersection markers: a red ring drawn AT each crossing where the
+  // route must cross an unsafe (LTS-3) street it does NOT itself ride — i.e.
+  // dangerous cross traffic. The street line stays colored by the route's own
+  // stress, so a calm block (or even a stressful one) that merely meets a busy
+  // intersection is not marked unless a stressful street actually crosses there.
+  const dSrcId = routeDangerSourceId(destId, kind);
+  const dLyrId = routeDangerLayerId(destId, kind);
+  const dangerGeo = {
+    type: "FeatureCollection",
+    features: (route.danger_intersections || []).map((d) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [d.lon, d.lat] },
+      properties: { lts: d.lts },
+    })),
+  };
+  if (map.getSource(dSrcId)) {
+    map.getSource(dSrcId).setData(dangerGeo);
+  } else {
+    map.addSource(dSrcId, { type: "geojson", data: dangerGeo });
+  }
+  if (map.getLayer(dLyrId)) map.removeLayer(dLyrId);
+  map.addLayer({
+    id: dLyrId,
+    type: "circle",
+    source: dSrcId,
+    paint: {
+      "circle-radius": 5,
+      "circle-color": "#ffffff",
+      "circle-stroke-color": "#dc2626",
+      "circle-stroke-width": 2.5,
+      "circle-opacity": 0.95,
+    },
+    metadata: { destId, kind, danger: true },
+  });
 }
 
 function removeRouteLayer(map, destId, kind) {
@@ -266,6 +307,11 @@ function removeRouteLayer(map, destId, kind) {
   if (map.getLayer(lyrId)) map.removeLayer(lyrId);
   if (map.getSource(srcId)) map.removeSource(srcId);
   routeLayers.delete(lyrId);
+  // Tear down the paired danger-marker layer (not tracked in routeLayers).
+  const dSrcId = routeDangerSourceId(destId, kind);
+  const dLyrId = routeDangerLayerId(destId, kind);
+  if (map.getLayer(dLyrId)) map.removeLayer(dLyrId);
+  if (map.getSource(dSrcId)) map.removeSource(dSrcId);
 }
 
 // Synchronously prune route layers for destinations that no longer exist

@@ -63,11 +63,79 @@ def test_safe_route_records_lts_distribution(tiny_bikemap_db: Path) -> None:
     assert sum(r.lts_distribution.values()) == len(r.edge_path)
 
 
+def test_route_edge_lts_reflects_street_stress_not_intersection(
+    tiny_bikemap_db: Path,
+) -> None:
+    """edge_lts colors the route line by each STREET segment's own stress, not
+    the stress of the intersection it leads into. Regression: a calm green block
+    that merely approached a dangerous (lts_approach=3) intersection was painted
+    red, so the danger looked smeared across the block instead of sitting at the
+    crossing. The fast route v100->v400 passes THROUGH v300 (lts_approach=3) but
+    both street segments are calm (seg_lts=1), so no edge may be colored 3.
+    The intersection's danger is surfaced separately via vertex_lts."""
+    snap = load_graph(tiny_bikemap_db)
+    v100 = vertex_for_int_id(snap, 100)
+    v300 = vertex_for_int_id(snap, 300)
+    v400 = vertex_for_int_id(snap, 400)
+    assert v100 is not None and v300 is not None and v400 is not None
+
+    r = compute_fast_route(snap, v100, v400)
+    assert r is not None
+    assert v300 in r.vertex_path  # route really does cross the dangerous node
+    assert 3 not in r.edge_lts    # ...but the calm street segments stay green
+    assert r.edge_lts == [1, 1]
+    # vertex_lts is the per-vertex intersection approach tier (length == vertex_path),
+    # kept for reference. (Danger markers are now driven by vertex_cross_lts —
+    # unsafe CROSS streets — not by this raw approach tier.)
+    assert len(r.vertex_lts) == len(r.vertex_path)
+    assert r.vertex_lts[r.vertex_path.index(v300)] == 3
+
+
+def test_danger_marks_only_unsafe_cross_streets(tiny_bikemap_db: Path) -> None:
+    """A node is a dangerous crossing ONLY when an unsafe (LTS-3) street the
+    route does NOT ride meets it. The fast route v100->v500 rides the direct
+    LTS-3 edge r5. At v500 the cross street r4 (v300<->v500, LTS-3) is unsafe,
+    so v500 is flagged. At v100 the only cross street is r1 (LTS-1); the route's
+    OWN r5 is LTS-3 but that's the line's color, not a node marker, so v100 is
+    NOT flagged."""
+    snap = load_graph(tiny_bikemap_db)
+    v100 = vertex_for_int_id(snap, 100)
+    v500 = vertex_for_int_id(snap, 500)
+    assert v100 is not None and v500 is not None
+
+    r = compute_fast_route(snap, v100, v500)
+    assert r is not None
+    assert r.vertex_path == [v100, v500]  # direct r5, no detour
+    assert len(r.vertex_cross_lts) == len(r.vertex_path)
+    # v500: unsafe cross street r4 → flagged.
+    assert r.vertex_cross_lts[r.vertex_path.index(v500)] >= 3
+    # v100: only calm cross street (r1, LTS-1); own r5 stress is on the line.
+    assert r.vertex_cross_lts[r.vertex_path.index(v100)] < 3
+
+
+def test_danger_not_marked_when_cross_streets_calm(tiny_bikemap_db: Path) -> None:
+    """v300 has lts_approach=3, but on the v200->v500 route the route rides r3
+    and r4 THROUGH v300, and the only streets crossing there (r1, r2) are calm
+    (LTS-1). With the cross-street rule the node is NOT marked — there is no
+    unsafe cross traffic to warn about, even though the intersection's approach
+    tier is high."""
+    snap = load_graph(tiny_bikemap_db)
+    v200 = vertex_for_int_id(snap, 200)
+    v300 = vertex_for_int_id(snap, 300)
+    v500 = vertex_for_int_id(snap, 500)
+    assert v200 is not None and v300 is not None and v500 is not None
+
+    r = compute_fast_route(snap, v200, v500)
+    assert r is not None
+    assert v300 in r.vertex_path
+    assert r.vertex_cross_lts[r.vertex_path.index(v300)] < 3
+
+
 def test_route_carries_per_edge_lts(divergent_bikemap_db: Path) -> None:
-    """edge_lts is the per-edge effective LTS the frontend uses to color the
-    safe-route polyline green (LTS 1) / orange (LTS 2) / red (LTS 3) per
-    segment. Length must match edge_path; values must be the max of
-    seg_lts and head_node lts_approach for each directed edge."""
+    """edge_lts is the per-edge street-segment LTS the frontend uses to color the
+    route polyline green (LTS 1) / orange (LTS 2) / red (LTS 3) per segment.
+    Length must match edge_path. (Intersection lts_approach is 1 throughout this
+    fixture, so the displayed segment LTS equals seg_lts.)"""
     snap = load_graph(divergent_bikemap_db)
     v10 = vertex_for_int_id(snap, 10)
     v40 = vertex_for_int_id(snap, 40)
