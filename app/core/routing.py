@@ -28,7 +28,7 @@ class Route:
     vertex_path: list[int]             # igraph vertex indices
     edge_lts: list[int]                # per-edge STREET-segment LTS (the street's own stress), length = len(edge_path); empty for trivial routes
     vertex_lts: list[int]              # per-vertex intersection approach tier (raw lts_approach), length = len(vertex_path); kept for reference, NOT what drives danger markers
-    vertex_cross_lts: list[int]        # per-vertex max LTS among CROSS streets the route does NOT ride; >= 3 marks a dangerous crossing (you must cross unsafe traffic there)
+    vertex_cross_lts: list[int]        # per-vertex max LTS among CROSS streets the route does NOT ride; >= DANGER_CROSS_LTS marks a dangerous crossing (you must cross unsafe traffic there)
     length_m: float                    # sum of edge_length_m along the path
     weighted_cost: float               # sum of weights along the path
     is_fallback: bool                  # True if main weights yielded no path
@@ -40,8 +40,9 @@ def _vertex_cross_lts(snap: GraphSnapshot, vertices: list[int],
     """Per-vertex max LTS among streets meeting the vertex that the route does
     NOT ride (its "cross streets").
 
-    A node is surfaced as a dangerous crossing only when this is >= 3 — i.e. the
-    rider must cross unsafe (LTS-3) traffic there. This keeps a calm pass-through
+    A node is surfaced as a dangerous crossing only when this is
+    >= DANGER_CROSS_LTS — i.e. the rider must cross high-stress (LTS 3 or 4)
+    traffic there. This keeps a calm pass-through
     of a high-approach-tier intersection unmarked: the danger marker now reflects
     cross-traffic the route conflicts with, not the node's own approach tier, and
     not the stress of the route's own segments (which is shown on the line).

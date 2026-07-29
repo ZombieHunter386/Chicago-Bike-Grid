@@ -59,8 +59,7 @@ def bbox_to_osmnx(
 
 
 # OSM highway classes excluded from the routable/displayed network. `service`
-# covers alleys, driveways, and parking aisles — not useful bike routes, and
-# They are not useful bike routes.
+# covers alleys, driveways, and parking aisles — not useful bike routes.
 _EXCLUDED_HIGHWAYS = frozenset({"service"})
 
 
@@ -145,8 +144,8 @@ def build_street_edges(graph: nx.MultiDiGraph) -> Iterator[OsmEdge]:
     monotonic counter (stable for a given deterministic graph build).
 
     Service roads (``highway=service`` — alleys, driveways, parking aisles) are
-    skipped: they aren't useful bike routes, and
-    left in they make up ~half of all OSM ways, dominating the map as clutter.
+    skipped: they aren't useful bike routes, and left in they make up ~half of
+    all OSM ways, dominating the map as clutter.
     """
     road_id = 0
     seen: set[tuple[frozenset[int], int]] = set()

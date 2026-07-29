@@ -148,3 +148,33 @@ def test_routes_payload_carries_polyline_lts_matching_segment_count(routes_app) 
         # back to (1, 2, 3) on that evidence.
         for v in polyline_lts:
             assert v in (1, 2, 3, 4), f"{kind}: unexpected LTS value {v}"
+
+
+@pytest.fixture
+def lts4_routes_app(lts4_bikemap_db: Path):
+    from flask import Flask
+
+    from app.core.graph import load_graph
+    from app.routes.routing import build_routes_blueprint
+
+    app = Flask(__name__)
+    app.register_blueprint(build_routes_blueprint(load_graph(lts4_bikemap_db)))
+    return app
+
+
+def test_routes_payload_carries_lts4(lts4_routes_app) -> None:
+    """An LTS-4 street must survive the whole API path, not just the DB.
+
+    The frontend colors segments off polyline_lts, so a 4 that never reaches the
+    payload would render as the unknown-value grey rather than red.
+    """
+    client = lts4_routes_app.test_client()
+    resp = client.post("/routes", json={
+        "home": {"lat": 41.940, "lon": -87.680},  # near v100
+        "dest": {"lat": 41.940, "lon": -87.670},  # near v300, across the LTS-4 street
+        "tier": "death_wish",
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert 4 in data["safe"]["polyline_lts"]
+    assert data["safe"]["lts_distribution"] == {"1": 1, "4": 1}

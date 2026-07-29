@@ -225,3 +225,37 @@ def test_route_returns_none_for_unreachable_endpoints() -> None:
         assert v1 is not None and v3 is not None
         assert compute_fast_route(snap, v1, v3) is None
         assert compute_safe_route(snap, v1, v3, "kid") is None
+
+
+# --- LTS 4 end-to-end coverage (4-level scale, 2026-07-29) ---
+
+
+def test_death_wish_routes_over_lts4_without_fallback(lts4_bikemap_db: Path) -> None:
+    """LTS 4 is in-tier for death_wish, so its main weights must yield a path.
+
+    This is the only test that drives weight-table index 3; a length-3 table
+    (the pre-migration shape) would IndexError here rather than pass quietly.
+    """
+    snap = load_graph(lts4_bikemap_db)
+    src = vertex_for_int_id(snap, 100)
+    dst = vertex_for_int_id(snap, 300)
+
+    route = compute_safe_route(snap, src, dst, "death_wish")
+
+    assert route is not None
+    assert route.is_fallback is False
+    assert route.lts_distribution == {1: 1, 4: 1}
+    assert 4 in route.edge_lts
+
+
+def test_experienced_tier_cannot_stay_on_tier_across_lts4(lts4_bikemap_db: Path) -> None:
+    """LTS 4 is out of tier for experienced (1-3), so the only path is a fallback."""
+    snap = load_graph(lts4_bikemap_db)
+    src = vertex_for_int_id(snap, 100)
+    dst = vertex_for_int_id(snap, 300)
+
+    route = compute_safe_route(snap, src, dst, "experienced")
+
+    assert route is not None
+    assert route.is_fallback is True, "crossing LTS 4 must be reported as a fallback"
+    assert 4 in route.edge_lts

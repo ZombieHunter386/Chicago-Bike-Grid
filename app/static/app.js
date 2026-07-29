@@ -645,12 +645,15 @@ function scheduleGapAnalysis() {
       //                              (e.g. a kid route of {1:66, 2:8}). Telling
       //                              this user the route "uses high-stress
       //                              streets" is false and scares them off.
+      // "Red" means LTS 3 OR 4: both are high-stress on the 4-level scale, and
+      // LTS 4 is the more common of the two county-wide (39,736 vs 10,985), so
+      // checking only "3" would call a 4-carrying route entirely calm.
       const fallbacks = [...perPairResults.values()].filter(
         (r) => r && r.safe_route_is_fallback,
       );
       const fallbackHasRed = fallbacks.some((r) => {
         const dist = r.safe_route && r.safe_route.lts_distribution;
-        return dist && Number(dist["3"]) > 0;
+        return dist && (Number(dist["3"]) > 0 || Number(dist["4"]) > 0);
       });
       let emptyMsg;
       if (fallbacks.length === 0) {

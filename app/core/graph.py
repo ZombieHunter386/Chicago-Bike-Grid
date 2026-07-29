@@ -262,8 +262,8 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     base_weights_by_tier: dict[str, np.ndarray] = {}
     fallback_weights_by_tier: dict[str, np.ndarray] = {}
     for tier_name, tables in TIERS.items():
-        main_w = np.asarray(tables["main"], dtype=np.float64)       # shape (3,)
-        fb_w = np.asarray(tables["fallback"], dtype=np.float64)     # shape (3,)
+        main_w = np.asarray(tables["main"], dtype=np.float64)       # shape (4,)
+        fb_w = np.asarray(tables["fallback"], dtype=np.float64)     # shape (4,)
         base_weights_by_tier[tier_name] = edge_length_m_arr * main_w[eff_idx]
         fallback_weights_by_tier[tier_name] = edge_length_m_arr * fb_w[eff_idx]
 

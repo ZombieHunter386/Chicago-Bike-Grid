@@ -24,6 +24,14 @@ from __future__ import annotations
 # threshold (which can misfire on long routes).
 INF_WEIGHT = 1e9
 
+# A crossing is surfaced as dangerous when the worst cross-street the route must
+# cross is at least this stressful. Deliberately 3, not 4, on the 4-level scale:
+# both LTS 3 and LTS 4 are high-stress to cross, and the old 3-tier threshold
+# (where 3 was the top) covered the same OSM road classes the 4-level table now
+# splits across 3 and 4 — so keeping 3 preserves the calibration rather than
+# silently narrowing which intersections get a marker.
+DANGER_CROSS_LTS = 3
+
 # Index i = LTS (i+1). Four entries per table: LTS 1..4.
 TIERS: dict[str, dict[str, list[float]]] = {
     "kid": {

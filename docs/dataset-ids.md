@@ -10,7 +10,7 @@ Verified 2026-05-05 against `https://data.cityofchicago.org/api/views/<id>.json`
 | `htai-wnw4` | Ward Offices | Alderman office POIs | ✅ 200 OK, 8 cols including geocoded address |
 | `x8fc-8rcq` | Libraries - Locations, Contact Information, and Usual Hours of Operation | CPL branch POIs | ✅ 200 OK, 8 cols including geocoded address |
 
-## CDOT bike-facility ArcGIS layers (Mellow + CDOT scoring, verified 2026-06-09)
+## CDOT bike-facility ArcGIS layers (verified 2026-06-09; now the improve-only override — see the Cook County section below)
 
 Discovered from the CDOT **"Existing Chicago Bike Facilities"** instant app
 (appid `d4085fb1e59b4eb69a119a4428868ee6`, owner `CDOT_PUB`) → web map
