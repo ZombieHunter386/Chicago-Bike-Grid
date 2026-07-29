@@ -22,7 +22,16 @@ def build_prep_report(
     lts_diff_path: Path | None = None,
     hin_match_report_path: Path | None = None,
     lts_network_size_bytes: int | None = None,
+    lts_matched_edges: int | None = None,
+    lts_fallback_edges: int | None = None,
 ) -> str:
+    """Render the per-run prep report as Markdown.
+
+    ``lts_matched_edges``/``lts_fallback_edges`` are the ``ClassifyStats`` counts
+    from :func:`prep.scoring.classify_network.classify_network`; when both are
+    given the report grows an "LTS way-ID match rate" section so 2023-snapshot
+    way-ID drift is visible every run. Omit them to omit the section.
+    """
     duration_s = (run_finished_at - run_started_at).total_seconds()
     lines = [
         "# Prep Report",
@@ -45,6 +54,21 @@ def build_prep_report(
         warns = f"{len(s.warnings)} warning(s)" if s.warnings else "—"
         lines.append(f"| `{s.name}` | **{s.status}** | {s.record_count} | {delta} | {warns} |")
     lines.append("")
+
+    if lts_matched_edges is not None and lts_fallback_edges is not None:
+        total = lts_matched_edges + lts_fallback_edges
+        # Empty network reads as 0% matched / 0% fallback, not a vacuous 100%:
+        # same deliberate convention as ClassifyStats.match_rate_pct (no edges
+        # means the OSM fetch or the county join broke).
+        matched_pct = (100.0 * lts_matched_edges / total) if total else 0.0
+        fallback_pct = (100.0 - matched_pct) if total else 0.0
+        lines += [
+            "## LTS way-ID match rate",
+            "",
+            f"- Edges matched to a Cook County way_id: {lts_matched_edges} ({matched_pct:.1f}%)",
+            f"- Edges on the road-class fallback: {lts_fallback_edges} ({fallback_pct:.1f}%)",
+            "",
+        ]
 
     has_warnings = any(s.warnings for s in sources)
     if has_warnings:

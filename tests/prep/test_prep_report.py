@@ -47,3 +47,25 @@ def test_prep_report_includes_per_source_status_and_deltas(tmp_path: Path) -> No
     assert "WARN" in md
     assert "3 rows missing geometry" in md
     assert "first run" in md.lower()
+
+
+def test_report_includes_lts_match_rate_when_provided() -> None:
+    report = build_prep_report(
+        run_started_at=dt.datetime(2026, 7, 29, 12, 0, tzinfo=dt.UTC),
+        run_finished_at=dt.datetime(2026, 7, 29, 12, 5, tzinfo=dt.UTC),
+        sources=[],
+        lts_matched_edges=9_000,
+        lts_fallback_edges=1_000,
+    )
+    assert "## LTS way-ID match rate" in report
+    assert "9000" in report.replace(",", "")
+    assert "90.0%" in report
+
+
+def test_report_omits_match_rate_section_when_absent() -> None:
+    report = build_prep_report(
+        run_started_at=dt.datetime(2026, 7, 29, 12, 0, tzinfo=dt.UTC),
+        run_finished_at=dt.datetime(2026, 7, 29, 12, 5, tzinfo=dt.UTC),
+        sources=[],
+    )
+    assert "match rate" not in report.lower()
