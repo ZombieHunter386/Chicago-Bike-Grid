@@ -1200,6 +1200,52 @@ git commit -m "feat(ui): four personas + four-color LTS ramp"
 
 ---
 
+### Task 7b: Restore CDOT facilities as an improve-only override
+
+> **Added mid-execution 2026-07-29 at the user's request**, reversing the
+> plan's original "full replacement" scope. Rationale: the county layer is a
+> 2023 snapshot, so protected lanes built in 2024–25 vanished from the map.
+> CDOT's Jan-2025 bikeway layer restores that currency. Two decisions taken
+> with the user before implementing: the override is **improve-only**
+> (`min(baseline, cdot)`), and **sharrows apply no override at all**. Full
+> rationale in spec §3.3.
+
+This task was executed inline rather than as a fresh subagent (the session hit
+its spend limit). What shipped:
+
+- **Restored from git history** (`git checkout 912e4ea^ --`):
+  `prep/fetchers/cdot_facilities.py`, `tests/prep/test_cdot_facilities_fetcher.py`.
+  Fetcher unchanged except its docstring; the test's `classify_tier` import
+  became `cdot_lts_for_facility`, asserting `[1, 2, None]` (sharrow → no
+  override) instead of the old `[1, 2, 3]`.
+- **`prep/scoring/classifier.py`**: added `CDOT_FACILITY_TO_LTS` (both the live
+  `BIKE_DSPLY` and fallback `DISPLAYROU` vocabularies), `CDOT_OFF_STREET_LTS`,
+  `CDOT_FACILITY_NO_OVERRIDE` (sharrow spellings, so unknown-value warnings stay
+  meaningful), `_normalize`, `cdot_lts_for_facility(facility, *, off_street)`
+  and `apply_cdot_override(baseline, cdot)` — the latter being just `min`, with
+  the reasoning in its docstring.
+- **`prep/scoring/classify_network.py`**: re-added the spatial matcher as a
+  public `cdot_lts_for_edges` (buffer + ±30° bearing via the `hin_to_osm`
+  internals; bearing-optional for off-street trails; best override wins).
+  `classify_network` takes a third optional `cdot_facilities` argument and
+  `ClassifyStats` gains `cdot_improved` so the report shows CDOT's contribution.
+- **`prep/main.py` + `sources.yaml`**: CDOT fetch/parse wiring restored; the
+  `cdot_bike_network` / `cdot_off_street_trails` blocks are back with comments
+  describing the new override role.
+- **`prep/reporting/prep_report.py`**: match-rate section gained an
+  "Edges improved by a CDOT facility" line.
+- **Tests**: 9 new classifier cases (vocabulary mapping, normalization,
+  sharrows, unknown values, off-street, `min` across all four baselines, plus
+  two worked examples); 6 new `classify_network` cases (improve-not-worsen,
+  perpendicular trail accepted vs. perpendicular lane rejected, best-facility,
+  fallback-edge override, `None` == `[]`); `test_main` now asserts the arterial
+  on way 222 lands at LTS 1 via a CDOT protected lane and that the report
+  reports one improved edge.
+
+Gate after this task: ruff clean, mypy clean (49 files), **254 passed**.
+
+---
+
 ### Task 8: Docs
 
 **Files:**

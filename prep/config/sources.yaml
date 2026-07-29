@@ -30,9 +30,45 @@ sources:
     # OSM way id (spot-checked: 24072568 = North Marmora Avenue), so matching
     # is an attribute-only way-ID join — geometry is never fetched.
     # Hub page: https://hub-cookcountyil.opendata.arcgis.com/datasets/cookcountyil::level-of-traffic-stress-2023
-    # Replaced the Mellow Bike Map + CDOT bike-facility sources (2026-07-29).
+    # Replaced the Mellow Bike Map as the stress baseline (2026-07-29). The CDOT
+    # layers below remain, as an improve-only override (see design §3.3).
     layer_url: "https://gis.cookcountyil.gov/traditional/rest/services/DOTH_expanded/MapServer/14"
     refresh_cadence: "annual"
+
+  cdot_bike_network:
+    name: "CDOT Chicago Bikeway Network (on-street, facility type)"
+    type: "arcgis_feature_service"
+    # Improve-only override on the Cook County LTS baseline (design §3.3): this
+    # Jan-2025 layer knows about facilities built after the county's 2023 OSM
+    # snapshot, so it can lower a street's LTS but never raise it.
+    # Discovered via the 'Existing Chicago Bike Facilities' instant app
+    # (appid d4085fb1e59b4eb69a119a4428868ee6) -> web map
+    # a693899119c34a71a1e9120802633e6a -> layer "Bike Network (Jan 2025)".
+    # 931 polyline features, last edited Jan 2025. outSR honored at 4326.
+    # Facility-type field is BIKE_DSPLY (abbreviated, single-word values):
+    #   PROTECTED -> LTS 1, NEIGHBORHOOD -> LTS 1,
+    #   BUFFERED  -> LTS 2, BIKE         -> LTS 2,
+    #   SHARED    -> no override (sharrow: paint, no physical protection).
+    # NB: the newer Sep-2025 and Dec-2025 snapshots in the same app are
+    # attribute-query-only (returnGeometry=true 400s), so unusable for the
+    # spatial match — this Jan-2025 "Final_Public" layer is the most current one
+    # that exports geometry. The Apr-2023 layer (Chicago_Bike_Facilities_2023,
+    # field DISPLAYROU, full-name vocab) is the stable fallback if needed; the
+    # classifier's facility table covers both vocabularies.
+    on_street_url: "https://services.arcgis.com/G3nmNsarwQblLhip/arcgis/rest/services/Bikeway_Network_2024_Final_Public/FeatureServer/0"
+    facility_type_field: "BIKE_DSPLY"
+    refresh_cadence: "quarterly"
+
+  cdot_off_street_trails:
+    name: "CDOT Chicago Off-Street Bike Trails"
+    type: "arcgis_feature_service"
+    # Off-street layer "Off-Street Trails (Sept 2025)" from the same web map.
+    # 88 polyline features, last edited Nov 2024. outSR honored at 4326, geometry
+    # exports fine. All features -> LTS 1 unconditionally, so the facility-type
+    # field is not consulted for this layer; the spatial match is also
+    # bearing-optional here because trails legitimately cross streets.
+    trails_url: "https://services7.arcgis.com/A03QrhyHnDaUmK0W/arcgis/rest/services/Trails_Network_2024_11_18/FeatureServer/0"
+    refresh_cadence: "quarterly"
 
   cdp_alderman_offices:
     name: "Chicago Aldermanic Ward Offices"

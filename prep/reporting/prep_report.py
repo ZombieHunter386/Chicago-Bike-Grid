@@ -73,6 +73,7 @@ def build_prep_report(
             f"({matched_pct:.1f}%)",
             f"- Edges on the road-class fallback: {lts_stats.fallback:,} "
             f"({fallback_pct:.1f}%)",
+            f"- Edges improved by a CDOT facility: {lts_stats.cdot_improved:,}",
             "",
             "Expect ≥ 95%. A materially lower rate means 2023-snapshot way-ID "
             "drift and the road-class fallback is carrying too much of the network.",

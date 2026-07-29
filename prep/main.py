@@ -18,6 +18,16 @@ from prep.config_loader import load_sources_config
 from prep.db.builder import DbBuilder
 from prep.db.treatments_loader import load_treatments
 from prep.fetchers.base import rotate_snapshots, today_snapshot_dir
+from prep.fetchers.cdot_facilities import (
+    OFF_STREET_FILENAME as CDOT_OFF_STREET_FILENAME,
+)
+from prep.fetchers.cdot_facilities import (
+    ON_STREET_FILENAME as CDOT_ON_STREET_FILENAME,
+)
+from prep.fetchers.cdot_facilities import (
+    CdotFacilitiesFetcher,
+    parse_cdot_facilities,
+)
 from prep.fetchers.cook_lts import (
     SNAPSHOT_FILENAME as COOK_LTS_FILENAME,
 )
@@ -220,6 +230,20 @@ def run_pipeline(
             previous_record_count=None, warnings=r.warnings,
         ))
 
+    cdot_net_src = cfg.sources.get("cdot_bike_network")
+    cdot_trails_src = cfg.sources.get("cdot_off_street_trails")
+    if cdot_net_src is not None and cdot_trails_src is not None:
+        cdot_fac = CdotFacilitiesFetcher(
+            on_street_url=cdot_net_src.extra["on_street_url"],
+            facility_type_field=cdot_net_src.extra["facility_type_field"],
+            trails_url=cdot_trails_src.extra["trails_url"],
+        )
+        r = cdot_fac.fetch(snapshot_dir)
+        sources.append(SourceRunSummary(
+            name="cdot_facilities", status=r.status, record_count=r.record_count,
+            previous_record_count=None, warnings=r.warnings,
+        ))
+
     speed_src = cfg.sources.get("chicago_speed_limits")
     if speed_src is not None:
         speed = SpeedLimitsFetcher(
@@ -301,7 +325,8 @@ def run_pipeline(
         builder = DbBuilder(tmp_db)
         builder.create_schema()
 
-        # Topology from OSM (osmnx); LTS 1-4 from the Cook County way-ID join.
+        # Topology from OSM (osmnx); LTS 1-4 from the Cook County way-ID join,
+        # with CDOT bike facilities as an improve-only override on top.
         # Prune to the routable network *after* osmnx's build: removing service
         # roads (alleys) orphans the intersections that only touched them, so we
         # re-take the largest weakly-connected component to drop those dead
@@ -315,8 +340,17 @@ def run_pipeline(
             if cook_lts_src is not None
             else {}
         )
+        cdot_facilities = (
+            list(parse_cdot_facilities(
+                snapshot_dir / CDOT_ON_STREET_FILENAME,
+                snapshot_dir / CDOT_OFF_STREET_FILENAME,
+                cdot_net_src.extra["facility_type_field"],
+            ))
+            if cdot_net_src is not None and cdot_trails_src is not None
+            else []
+        )
 
-        segs, classify_stats = classify_network(edges, way_lts)
+        segs, classify_stats = classify_network(edges, way_lts, cdot_facilities)
         ints = build_intersection_records(nodes, segs)
 
         pois = list(ingest_osm_pois(snapshot_dir))

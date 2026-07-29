@@ -1,14 +1,15 @@
 # Cook County LTS 2023 (4-level) scoring — Design
 
 **Date**: 2026-07-29
-**Status**: APPROVED by user 2026-07-29 (data source, 4 personas, road-class fallback)
+**Status**: APPROVED by user 2026-07-29 (data source, 4 personas, road-class
+fallback); amended same day to keep CDOT as an improve-only override (§3.3)
 **Scope**: Replaces the segment-stress *source* and moves the whole app from a
-3-tier stress scale to the standard 4-level LTS scale. The Mellow Bike Map +
-CDOT classifier (2026-06-09 design) is removed entirely; street stress now
-comes from Cook County DoTH's published Level of Traffic Stress (2023) layer,
-joined to our OSM graph by way ID. The routing graph build (osmnx), HIN
-overlay, POI layers, treatments, and the overall shape of `/` and `/explore`
-are unchanged.
+3-tier stress scale to the standard 4-level LTS scale. The Mellow Bike Map is
+removed; street stress now comes from Cook County DoTH's published Level of
+Traffic Stress (2023) layer, joined to our OSM graph by way ID, with the CDOT
+bike-facility layers retained as an improve-only override so post-2023
+facilities still register. The routing graph build (osmnx), HIN overlay, POI
+layers, treatments, and the overall shape of `/` and `/explore` are unchanged.
 
 ---
 
@@ -23,11 +24,13 @@ standard 4-level LTS scale (1 = least stress, 4 = most).
 
 Decisions locked with the user (2026-07-29):
 
-1. **Full replacement.** Cook County LTS is the only stress source. Mellow +
-   CDOT fetchers, their `sources.yaml` entries, and the current classifier
-   logic are removed. Known trade-off: the layer is a 2023 snapshot updated
-   annually, so facilities built since then won't show until the county
-   refreshes it.
+1. **Cook County LTS is the baseline; CDOT bike facilities remain as an
+   improve-only override.** The Mellow Bike Map is removed entirely. *Revised
+   later the same day* — the original decision was a full replacement of both
+   Mellow and CDOT, but that gave up currency: the county layer is a 2023
+   snapshot refreshed annually, while CDOT's bikeway layer is current to Jan
+   2025, so protected lanes built in 2024–25 would have disappeared from the
+   map. CDOT is therefore restored in the narrower role defined in §3.3.
 2. **Four personas** replace the three route tiers: **Kid** (LTS 1),
    **Inexperienced** (LTS 1–2), **Experienced** (LTS 1–3), **Death wish**
    (LTS 1–4). Old `parent`/`any` tier keys are removed (frontend is the only
@@ -61,14 +64,16 @@ unparseable `lts` value → WARN/FAIL per the existing fetcher conventions.
 Record the layer in `docs/dataset-ids.md` alongside the discovery notes.
 
 `sources.yaml`: add `cook_lts` block (type `arcgis_mapserver_layer`, url,
-refresh cadence); delete `mellow`, `cdot_bike_network`,
-`cdot_off_street_trails` blocks. `hin`, `chicago_speed_limits`, CDP + OSM POI
+refresh cadence); delete the `mellow` block. `cdot_bike_network` and
+`cdot_off_street_trails` are **kept** — they now feed the §3.3 override rather
+than the old precedence chain. `hin`, `chicago_speed_limits`, CDP + OSM POI
 sources unchanged.
 
 ## 3. Classification algorithm
 
 Replaces `prep/scoring/classifier.py`'s three-source precedence
-(CDOT > Mellow > road class) with a two-step rule:
+(CDOT > Mellow > road class). Mellow is gone; the county layer becomes the
+baseline and CDOT is demoted from "wins outright" to "may only improve":
 
 ### 3.1 Way-ID join (primary)
 
@@ -93,17 +98,59 @@ table to 4 levels:
 | 3 | `secondary`, `secondary_link` |
 | 4 | `primary`, `primary_link`, `trunk`, `trunk_link`, `motorway`, `motorway_link`, `busway`, unknown/missing |
 
-### 3.3 Intersections
+### 3.3 CDOT facilities — improve-only override
+
+The county baseline is computed from **2023** OSM. CDOT's on-street bikeway
+layer is current to **Jan 2025** and its trails layer to Nov 2024, so CDOT
+knows about facilities the county snapshot cannot. It is applied on top of the
+baseline as an override that can only *lower* LTS:
+
+```
+final_lts = min(baseline_lts, cdot_lts)   # cdot_lts absent -> baseline
+```
+
+**Why improve-only** (user decision 2026-07-29): a CDOT facility type is
+evidence that infrastructure *exists*, which is genuinely new information. But
+it says nothing about traffic speed, volume, or lane count — the very inputs
+the UMN methodology already weighed. Letting CDOT raise LTS would mean a
+sharrow could make a hostile arterial look calmer, and a signed shared lane
+could downgrade a quiet residential street the county correctly rated LTS 1.
+Improve-only takes the new information without discarding the modelling.
+
+| CDOT value (`BIKE_DSPLY` / `DISPLAYROU`) | Override LTS |
+|---|---|
+| `PROTECTED` / `PROTECTED BIKE LANE` | 1 |
+| `NEIGHBORHOOD` / `NEIGHBORHOOD GREENWAY` | 1 |
+| Off-street trail layer (whole layer) | 1 |
+| `BUFFERED` / `BUFFERED BIKE LANE` | 2 |
+| `BIKE` / `BIKE LANE` | 2 |
+| `SHARED` / `SHARED-LANE` (sharrow) | **none** — no override applied |
+
+Sharrows are deliberately absent from the table rather than mapped to a value:
+paint without physical protection earns no upgrade, and under improve-only
+semantics any mapping would be a no-op at best. Unknown facility strings also
+apply no override and are logged, so a CDOT vocabulary change is visible in the
+prep run. Both vocabularies are covered so either CDOT layer resolves.
+
+**Matching** is spatial (the CDOT layers carry geometry, not OSM way IDs),
+reusing the tested `prep/joins/hin_to_osm.py` internals: a metric-projected
+buffer plus a ±30° bearing agreement so a lane on a cross-street doesn't bleed
+onto its neighbours. Off-street trails are bearing-optional, since trails
+legitimately cross streets. Where several facilities cover one edge, the best
+(lowest) override wins.
+
+### 3.4 Intersections
 
 Unchanged rule (`lts_approach` = worst incident edge, floor 1 for isolated
 nodes), now producing values 1–4.
 
-### 3.4 Reporting
+### 3.5 Reporting
 
-`prep_report.md` gains a **match-rate** line: edges matched by way ID vs.
+`prep_report.md` gains a **match-rate** section: edges matched by way ID vs.
 edges on the road-class fallback (count + %), so 2023→now way-ID drift is
-visible every run. `lts_diff.py` works unchanged (it diffs `streets.lts`
-integers).
+visible every run, plus a count of edges the CDOT override improved so each
+source's contribution is legible. `lts_diff.py` works unchanged (it diffs
+`streets.lts` integers).
 
 ## 4. Personas & routing weights
 
@@ -139,11 +186,11 @@ these four keys; `parent` and `any` are removed everywhere (routes, frontend
   comments update 1..3 → 1..4.
 - `app/core/graph.py`: int8 arrays and `eff_lts = max(seg, head)` logic are
   value-agnostic; comment updates only.
-- Dead code removed: `prep/fetchers/mellow.py`, `prep/fetchers/cdot_facilities.py`,
-  Mellow/CDOT branches of `prep/scoring/classifier.py` +
-  `classify_network.py`, their tests, and the fetch/parse/classify wiring in
-  `prep/main.py` (replaced by the cook_lts fetch + new classify call).
-- `prep/reporting/` gains the match-rate summary (§3.4).
+- Dead code removed: `prep/fetchers/mellow.py`, the Mellow branches of
+  `prep/scoring/classifier.py` + `classify_network.py`, and their tests.
+  `prep/fetchers/cdot_facilities.py` is retained unchanged apart from its
+  docstring; its spatial matcher moves into `cdot_lts_for_edges`.
+- `prep/reporting/` gains the match-rate summary (§3.5).
 
 ## 7. Testing (TDD)
 
@@ -151,6 +198,12 @@ these four keys; `parent` and `any` are removed everywhere (routes, frontend
 - Classifier truth table: single-way match each LTS 1–4; multi-way edge
   worst-wins; duplicate way_id worst-wins; unmatched → each road-class level;
   string→int parsing (incl. bad values → fallback + warning).
+- CDOT override: each facility string → override LTS (both vocabularies, with
+  normalization); sharrows and unknown values → no override; off-street → 1;
+  `min` semantics across all four baselines (never worsens); spatial match
+  rejects a perpendicular on-street lane but accepts a perpendicular trail;
+  best facility wins when several cover one edge; override also applies to
+  road-class-fallback edges.
 - Weights: 4×4 table sanity, `_validate_lts` bounds, INF placement per tier.
 - Intersections: worst-incident rule over 1–4.
 - Routing: tier-key rename (four keys valid, old keys 4xx), fallback-weight
@@ -176,6 +229,7 @@ these four keys; `parent` and `any` are removed everywhere (routes, frontend
 ## 9. Out of scope
 
 - Per-direction LTS; time-of-day stress (unchanged from prior design).
-- Supplementing the 2023 snapshot with newer CDOT facilities (explicitly
-  rejected in favor of full replacement; revisit when the county ships 2024+).
+- Letting CDOT *raise* an LTS (improve-only by design — see §3.3).
+- Reconciling the two sources' disagreements beyond the `min` rule (no
+  confidence weighting, no per-source provenance stored per edge).
 - Renaming DB columns or API field names beyond the tier keys.

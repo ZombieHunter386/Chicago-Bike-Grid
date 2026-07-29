@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import networkx as nx
-from shapely.geometry import LineString
+from shapely.geometry import LineString, mapping
 
 from prep.fetchers.base import FetchResult
+from prep.fetchers.cdot_facilities import CdotFacility
 from prep.main import PipelineResult, _hin_features_from_geojson, run_pipeline
 
 
@@ -48,6 +49,17 @@ sources:
     type: "arcgis_mapserver_layer"
     layer_url: "https://example.com/DOTH_expanded/MapServer/14"
     refresh_cadence: "annual"
+  cdot_bike_network:
+    name: "CDOT Bikeway Network"
+    type: "arcgis_feature_service"
+    on_street_url: "https://example.com/cdot_on"
+    facility_type_field: "BIKE_DSPLY"
+    refresh_cadence: "quarterly"
+  cdot_off_street_trails:
+    name: "CDOT Off-Street Trails"
+    type: "arcgis_feature_service"
+    trails_url: "https://example.com/cdot_off"
+    refresh_cadence: "quarterly"
   cdp_alderman_offices:
     name: "CDP Alderman Offices"
     type: "socrata"
@@ -71,9 +83,11 @@ target:
     )
 
 
+@patch("prep.main.parse_cdot_facilities")
 @patch("prep.main.parse_cook_lts")
 @patch("prep.main.build_graph_from_bbox")
 @patch("prep.main.OsmPoisFetcher")
+@patch("prep.main.CdotFacilitiesFetcher")
 @patch("prep.main.CookLtsFetcher")
 @patch("prep.main.SpeedLimitsFetcher")
 @patch("prep.main.CdpPoisFetcher")
@@ -83,9 +97,11 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     mock_cdp: MagicMock,
     mock_speed: MagicMock,
     mock_cook_lts: MagicMock,
+    mock_cdot_fac: MagicMock,
     mock_osm_pois: MagicMock,
     mock_build_graph: MagicMock,
     mock_parse_cook_lts: MagicMock,
+    mock_parse_cdot: MagicMock,
     tmp_path: Path,
     fixtures_dir: Path,
 ) -> None:
@@ -103,6 +119,7 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     mock_hin.return_value.fetch.return_value = _ok(50)
     mock_speed.return_value.fetch.return_value = _ok(200)
     mock_cook_lts.return_value.fetch.return_value = _ok(207_000)
+    mock_cdot_fac.return_value.fetch.return_value = _ok(900)
     mock_cdp.return_value.fetch.return_value = _ok(60)
     mock_osm_pois.return_value.fetch.return_value = _ok(20)
 
@@ -111,6 +128,15 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     # The county rates way 111 as LTS 1; way 222 is absent from the 2023
     # snapshot and is an arterial (highway=primary) -> road-class fallback 4.
     mock_parse_cook_lts.return_value = {"111": 1}
+    # A protected lane on way 222's alignment (built after the 2023 snapshot):
+    # the improve-only CDOT override pulls that arterial from LTS 4 down to 1.
+    mock_parse_cdot.return_value = [
+        CdotFacility(
+            facility_type="PROTECTED",
+            geometry=mapping(LineString([(-87.670, 41.940), (-87.670, 41.950)])),
+            off_street=False,
+        ),
+    ]
 
     result = run_pipeline(
         config_path=cfg_path,
@@ -128,6 +154,8 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     report_md = (tmp_path / "prep_report.md").read_text()
     assert "## LTS way-ID match rate" in report_md
     assert "1 (50.0%)" in report_md
+    # The CDOT override improved exactly one edge (way 222's arterial).
+    assert "improved by a CDOT facility: 1" in report_md
     assert (db_path.parent / "lts-network.geojson.gz").exists()
     assert (db_path.parent / "lts-network.geojson.gz").stat().st_size > 0
 
@@ -145,14 +173,15 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     assert streets_count == 2, f"expected 2 streets from graph, got {streets_count}"
     # 2 edges share node 11: 3 unique intersection nodes total.
     assert ints_count == 3, f"expected 3 intersections, got {ints_count}"
-    # County LTS 1 on way 111; way 222 (primary, unmatched) -> road-class 4.
-    assert lts_values == [1, 4], f"expected LTS [1, 4], got {lts_values}"
+    # County LTS 1 on way 111; way 222 (primary, unmatched) -> road-class 4,
+    # then improved to 1 by the CDOT protected lane on its alignment.
+    assert lts_values == [1, 1], f"expected LTS [1, 1], got {lts_values}"
     meta_sources = {row[0] for row in meta_rows}
     assert "hin" in meta_sources
     assert "chicago_speed_limits" in meta_sources
     assert "cook_lts" in meta_sources
+    assert "cdot_facilities" in meta_sources
     assert "mellow" not in meta_sources
-    assert "cdot_facilities" not in meta_sources
     assert "cdp_pois" in meta_sources
     assert "osm_pois" in meta_sources
     assert "brokenspoke" not in meta_sources
