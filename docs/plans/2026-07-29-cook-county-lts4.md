@@ -838,18 +838,47 @@ git commit -m "feat(scoring): classify_network via county way-ID join, with matc
 
 Append to `tests/prep/test_prep_report.py` (add the import of `dt`/existing helpers to match the file's existing style — it already builds `SourceRunSummary` lists and calls `build_prep_report`):
 
+> **Revised 2026-07-29 (approved after code review):** this task ships a single
+> `lts_stats: ClassifyStats | None` parameter rather than two loose ints. Taking
+> the dataclass keeps the empty-network percentage convention defined in exactly
+> one place (`ClassifyStats.match_rate_pct`) and makes the half-passed state
+> (one int given, the other omitted → section silently dropped) unrepresentable.
+> `prep/reporting/hin_match_report.py` already imports domain dataclasses from
+> `prep.joins`, so this matches the package's existing pattern. The plan's
+> original `{100 - pct}` fallback line also rendered a contradictory
+> "0 (100.0%)" on an empty network; the shipped version computes both
+> percentages directly from the counts.
+
 ```python
 def test_report_includes_lts_match_rate_when_provided() -> None:
     report = build_prep_report(
         run_started_at=dt.datetime(2026, 7, 29, 12, 0, tzinfo=dt.UTC),
         run_finished_at=dt.datetime(2026, 7, 29, 12, 5, tzinfo=dt.UTC),
         sources=[],
-        lts_matched_edges=9_000,
-        lts_fallback_edges=1_000,
+        lts_stats=ClassifyStats(matched=9_000, fallback=1_000),
     )
     assert "## LTS way-ID match rate" in report
-    assert "9000" in report.replace(",", "")
-    assert "90.0%" in report
+    # Assert both lines in full: a fallback percentage accidentally bound to the
+    # matched one would still satisfy a bare "90.0%" check.
+    assert "9000 (90.0%)" in report.replace(",", "")
+    assert "1000 (10.0%)" in report.replace(",", "")
+
+
+def test_report_match_rate_empty_network_reads_zero_not_full() -> None:
+    """An empty network must not render as a vacuous 100% fallback rate.
+
+    Guards the deliberate divergence from HinMatchReport's empty-means-100%
+    convention — see the comment in build_prep_report.
+    """
+    report = build_prep_report(
+        run_started_at=dt.datetime(2026, 7, 29, 12, 0, tzinfo=dt.UTC),
+        run_finished_at=dt.datetime(2026, 7, 29, 12, 5, tzinfo=dt.UTC),
+        sources=[],
+        lts_stats=ClassifyStats(matched=0, fallback=0),
+    )
+    assert "## LTS way-ID match rate" in report
+    assert report.count("0 (0.0%)") == 2
+    assert "100.0%" not in report
 
 
 def test_report_omits_match_rate_section_when_absent() -> None:
@@ -868,24 +897,37 @@ Expected: New tests FAIL (unexpected keyword argument).
 
 - [ ] **Step 5.3: Implement**
 
-In `prep/reporting/prep_report.py`, add two keyword params to `build_prep_report` (after `lts_network_size_bytes`):
+In `prep/reporting/prep_report.py`, import `ClassifyStats` from
+`prep.scoring.classify_network` and add one keyword param to
+`build_prep_report` (after `lts_network_size_bytes`):
 
 ```python
-    lts_matched_edges: int | None = None,
-    lts_fallback_edges: int | None = None,
+    lts_stats: ClassifyStats | None = None,
 ```
 
 and, after the per-source table block (before the warnings section), insert:
 
 ```python
-    if lts_matched_edges is not None and lts_fallback_edges is not None:
-        total = lts_matched_edges + lts_fallback_edges
-        pct = (100.0 * lts_matched_edges / total) if total else 0.0
+    if lts_stats is not None:
+        # Empty network reads as 0% matched / 0% fallback, not a vacuous 100%:
+        # same deliberate convention as ClassifyStats.match_rate_pct (no edges
+        # means the OSM fetch or the county join broke). NB HinMatchReport
+        # .segment_match_pct in this same package deliberately takes the
+        # OPPOSITE convention (nothing to match is a complete outcome there),
+        # so the two are inconsistent on purpose — see its docstring.
+        total = lts_stats.total
+        matched_pct = lts_stats.match_rate_pct
+        fallback_pct = (100.0 * lts_stats.fallback / total) if total else 0.0
         lines += [
             "## LTS way-ID match rate",
             "",
-            f"- Edges matched to a Cook County way_id: {lts_matched_edges} ({pct:.1f}%)",
-            f"- Edges on the road-class fallback: {lts_fallback_edges} ({100 - pct:.1f}%)",
+            f"- Edges matched to a Cook County way_id: {lts_stats.matched:,} "
+            f"({matched_pct:.1f}%)",
+            f"- Edges on the road-class fallback: {lts_stats.fallback:,} "
+            f"({fallback_pct:.1f}%)",
+            "",
+            "Expect ≥ 95%. A materially lower rate means 2023-snapshot way-ID "
+            "drift and the road-class fallback is carrying too much of the network.",
             "",
         ]
 ```
@@ -983,8 +1025,7 @@ from prep.fetchers.cook_lts import (
 - Thread the stats into the final report call (`build_prep_report(...)` at the end of `run_pipeline`): add
 
 ```python
-        lts_matched_edges=classify_stats.matched if classify_stats else None,
-        lts_fallback_edges=classify_stats.fallback if classify_stats else None,
+        lts_stats=classify_stats,
 ```
 
   and initialize `classify_stats = None` before the `try:` block (the build may fail before classification).
