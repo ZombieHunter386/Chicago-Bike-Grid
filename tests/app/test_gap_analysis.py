@@ -22,16 +22,16 @@ def test_gap_no_detour_returns_empty(divergent_bikemap_db: Path) -> None:
     snap = load_graph(divergent_bikemap_db)
     v10 = vertex_for_int_id(snap, 10)
     assert v10 is not None
-    res = analyze_gap(snap, v10, v10, "any")
+    res = analyze_gap(snap, v10, v10, "death_wish")
     assert isinstance(res, GapResult)
     assert res.corridor is None
     assert res.intersections == ()
 
 
-def test_gap_parent_tier_corridor_with_combined_savings(
+def test_gap_inexperienced_tier_corridor_with_combined_savings(
     divergent_bikemap_db: Path,
 ) -> None:
-    """At parent tier on v100→v400 (divergent fixture):
+    """At inexperienced tier on v100→v400 (divergent fixture):
       fast = r3 (LTS-3 direct); safe = r1+r2 (LTS-1 detour, NOT fallback).
     Combined hypothesis upgrades r3 alone (only LTS>2 on fast). r3 weight
     drops from INF to len×1.2, beating the detour's len×1.0+len×1.0; safe
@@ -42,7 +42,7 @@ def test_gap_parent_tier_corridor_with_combined_savings(
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
     assert v100 is not None and v400 is not None
-    res = analyze_gap(snap, v100, v400, "parent")
+    res = analyze_gap(snap, v100, v400, "inexperienced")
     assert res.safe_route_is_fallback is False
     assert res.corridor is not None
     expected = res.safe_route.length_m - res.fast_route.length_m
@@ -64,7 +64,7 @@ def test_gap_corridor_overlay_geometry_is_multilinestring(
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
-    res = analyze_gap(snap, v100, v400, "parent")
+    res = analyze_gap(snap, v100, v400, "inexperienced")
     assert res.corridor is not None
     assert res.corridor.fast_lts_overlay_wkt.startswith("MULTILINESTRING")
 
@@ -77,7 +77,7 @@ def test_gap_road_geometry_is_multilinestring(
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
-    res = analyze_gap(snap, v100, v400, "parent")
+    res = analyze_gap(snap, v100, v400, "inexperienced")
     assert res.corridor is not None
     assert res.corridor.roads[0].geometry_wkt.startswith("MULTILINESTRING")
 
@@ -118,7 +118,7 @@ def test_gap_intersections_separated_from_corridor(
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
-    res = analyze_gap(snap, v100, v400, "parent")
+    res = analyze_gap(snap, v100, v400, "inexperienced")
     assert res.corridor is not None
     assert res.intersections == ()
 
@@ -155,7 +155,7 @@ def test_gap_joint_segment_and_intersection_upgrade_flips_fallback(
     v10 = vertex_for_int_id(snap, 10)
     v30 = vertex_for_int_id(snap, 30)
     assert v10 is not None and v30 is not None
-    res = analyze_gap(snap, v10, v30, "parent")
+    res = analyze_gap(snap, v10, v30, "inexperienced")
     assert res.safe_route_is_fallback is True, (
         "fixture expectation: every path from v10→v30 crosses an LTS-3 head "
         "intersection → safe falls back"
@@ -175,7 +175,7 @@ def test_gap_roads_sorted_by_marginal_loss_descending(
     snap = load_graph(divergent_bikemap_db)
     v100 = vertex_for_int_id(snap, 10)
     v400 = vertex_for_int_id(snap, 40)
-    res = analyze_gap(snap, v100, v400, "parent")
+    res = analyze_gap(snap, v100, v400, "inexperienced")
     assert res.corridor is not None
     losses = [r.marginal_loss_m for r in res.corridor.roads]
     assert losses == sorted(losses, reverse=True)

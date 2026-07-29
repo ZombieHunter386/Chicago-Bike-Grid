@@ -45,7 +45,7 @@ def test_gap_analysis_first_call_returns_running_then_ready(gap_app) -> None:
     resp = client.post("/gap-analysis", json={
         "home": {"lat": 41.940, "lon": -87.680},
         "dest": {"lat": 41.935, "lon": -87.675},
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 202
     data = resp.get_json()
@@ -61,7 +61,7 @@ def test_gap_analysis_cache_hit_returns_ready_immediately(gap_app) -> None:
     body = {
         "home": {"lat": 41.940, "lon": -87.680},
         "dest": {"lat": 41.935, "lon": -87.675},
-        "tier": "any",
+        "tier": "death_wish",
     }
     # Prime cache
     first = client.post("/gap-analysis", json=body)
@@ -96,7 +96,7 @@ def test_gap_analysis_dedupes_in_flight_jobs_by_cache_key(gap_app) -> None:
     body = {
         "home": {"lat": 41.940, "lon": -87.680},
         "dest": {"lat": 41.935, "lon": -87.675},
-        "tier": "any",
+        "tier": "death_wish",
     }
     first = client.post("/gap-analysis", json=body)
     assert first.status_code == 202

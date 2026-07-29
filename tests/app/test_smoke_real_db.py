@@ -34,11 +34,11 @@ def test_routes_and_memory_against_real_db(tmp_path: Path) -> None:
     assert post_mb < 480, f"memory budget exceeded: {post_mb:.0f} MB"
 
     client = app.test_client()
-    # Lake View → Loop, 'any' tier.
+    # Lake View → Loop, 'death_wish' tier.
     resp = client.post("/routes", json={
         "home": {"lat": 41.9398, "lon": -87.6685},
         "dest": {"lat": 41.8819, "lon": -87.6278},
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 200
     data = resp.get_json()
@@ -99,7 +99,7 @@ def test_memory_under_sustained_load(tmp_path: Path) -> None:
     routes_payload = {
         "home": {"lat": 41.9398, "lon": -87.6685},
         "dest": {"lat": 41.8819, "lon": -87.6278},
-        "tier": "any",
+        "tier": "death_wish",
     }
     pois_payload = {"near": {"lat": 41.94, "lon": -87.67}, "category": "school"}
 

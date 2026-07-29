@@ -10,7 +10,7 @@ loader, basic routing). Has an LTS-3 chokepoint at v300 to exercise the
 max rule.
 
 ``divergent_bikemap_db`` — 4-node graph specifically designed to force
-fast/safe divergence at 'parent' tier for gap-analysis tests. The fast
+fast/safe divergence at 'inexperienced' tier for gap-analysis tests. The fast
 route uses a direct LTS-3 segment; the safe route detours via two
 LTS-1 segments.
 
@@ -123,7 +123,7 @@ def tiny_bikemap_db(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def divergent_bikemap_db(tmp_path: Path) -> Path:
-    """4-node graph where fast and safe routes diverge at 'parent' tier.
+    """4-node graph where fast and safe routes diverge at 'inexperienced' tier.
 
          v100 ────[r1: lts=1, len 150m]────── v200
           │                                    │

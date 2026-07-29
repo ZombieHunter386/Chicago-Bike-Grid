@@ -107,8 +107,10 @@ def test_load_graph_precomputes_main_and_fallback_per_tier_weights(
 ) -> None:
     """Both main and fallback weights are precomputed at load (Fix 9)."""
     snap = load_graph(tiny_bikemap_db)
-    assert set(snap.base_weights_by_tier.keys()) == {"kid", "parent", "any"}
-    assert set(snap.fallback_weights_by_tier.keys()) == {"kid", "parent", "any"}
+    assert set(snap.base_weights_by_tier.keys()) == {
+        "kid", "inexperienced", "experienced", "death_wish"}
+    assert set(snap.fallback_weights_by_tier.keys()) == {
+        "kid", "inexperienced", "experienced", "death_wish"}
     for tier_weights in snap.base_weights_by_tier.values():
         assert len(tier_weights) == snap.g.ecount()
     for tier_weights in snap.fallback_weights_by_tier.values():
