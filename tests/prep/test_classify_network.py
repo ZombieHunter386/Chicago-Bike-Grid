@@ -47,7 +47,17 @@ def test_classify_network_joins_by_way_id_and_tracks_match_rate() -> None:
 
 def test_classify_stats_match_rate_percent() -> None:
     assert ClassifyStats(matched=3, fallback=1).match_rate_pct == 75.0
+    # Empty network reads as 0%, not a vacuous 100% — see the property's comment.
     assert ClassifyStats(matched=0, fallback=0).match_rate_pct == 0.0
+
+
+def test_classify_stats_total() -> None:
+    assert ClassifyStats(matched=3, fallback=1).total == 4
+    assert ClassifyStats(matched=0, fallback=0).total == 0
+
+
+def test_classify_network_on_empty_network() -> None:
+    assert classify_network([], {}) == ([], ClassifyStats(matched=0, fallback=0))
 
 
 def test_classify_network_preserves_edge_fields() -> None:
@@ -61,6 +71,11 @@ def test_classify_network_preserves_edge_fields() -> None:
     assert r.name == "Street 7"
     assert r.highway == "residential"
     assert r.geometry_wkt == "LINESTRING(-87.7 41.9, -87.69 41.9)"
+    # These stay null here by contract — later passes fill them in
+    # (intersection_tiers sets ft_int_str/tf_int_str; speed is unused).
+    assert r.speed is None
+    assert r.ft_int_str is None
+    assert r.tf_int_str is None
 
 
 def test_edge_with_no_way_ids_falls_back_to_road_class() -> None:

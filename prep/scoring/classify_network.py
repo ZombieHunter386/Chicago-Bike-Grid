@@ -25,9 +25,17 @@ class ClassifyStats:
     fallback: int
 
     @property
+    def total(self) -> int:
+        return self.matched + self.fallback
+
+    @property
     def match_rate_pct(self) -> float:
-        total = self.matched + self.fallback
-        return (100.0 * self.matched / total) if total else 0.0
+        # An empty network reads as 0% (failure), not a vacuous 100%: no edges
+        # means the OSM fetch or the county join broke, and prep_report should
+        # show that as a bad number. Note HinMatchReport.segment_match_pct takes
+        # the opposite convention (empty -> 100.0) because there "nothing to
+        # match" is a legitimately complete outcome; the divergence is deliberate.
+        return (100.0 * self.matched / self.total) if self.total else 0.0
 
 
 def classify_network(

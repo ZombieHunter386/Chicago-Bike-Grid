@@ -1,4 +1,4 @@
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString, MultiLineString, Point
 
 from prep.joins.hin_to_osm import (
     HinIntersectionFeature,
@@ -46,6 +46,38 @@ def test_join_segments_skips_perpendicular_lines() -> None:
     matches = list(join_hin_segments_to_osm(hin_segments=hin, osm_segments=osm))
     # Bearings differ by 90 degrees — should NOT match
     assert matches == []
+
+
+def test_join_segments_matches_multilinestring_hin_segment() -> None:
+    """A HIN segment digitized in two parts must match without raising.
+
+    `_esri_geom_to_geojson` (prep/fetchers/hin.py) maps an ArcGIS feature with
+    multiple `paths` to a MultiLineString, and `LineString.coords` raises
+    "Sub-geometries may have coordinate sequences, but multi-part geometries do
+    not" on those — `_bearing()` flattens the parts into sub-segments instead.
+    """
+    # Same east-west OSM segment as the parallel-match case above.
+    osm = [
+        OsmSegment(osm_id=1, geometry=LineString([(-87.689, 41.975), (-87.679, 41.975)])),
+    ]
+    # The identical 5m-N offset line, but split into two parts at the midpoint.
+    hin = [
+        HinSegmentFeature(
+            feature_id="h1",
+            geometry=MultiLineString(
+                [
+                    [(-87.689, 41.97505), (-87.684, 41.97505)],
+                    [(-87.684, 41.97505), (-87.679, 41.97505)],
+                ]
+            ),
+            modal_flags={"bike": True, "ped": True},
+            severity_rank=4,
+        ),
+    ]
+    matches = list(join_hin_segments_to_osm(hin_segments=hin, osm_segments=osm))
+    assert len(matches) == 1
+    assert matches[0].osm_id == 1
+    assert matches[0].hin_feature_id == "h1"
 
 
 def test_join_intersections_nearest_within_30m() -> None:
