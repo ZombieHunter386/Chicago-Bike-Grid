@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
+
 from prep.fetchers.cook_lts import (
     MIN_EXPECTED_RECORDS,
     SNAPSHOT_FILENAME,
@@ -68,15 +70,28 @@ def test_fetch_fails_on_arcgis_error_payload(mock_get, tmp_path: Path) -> None:
     assert result.status == "FAIL"
 
 
+@patch("prep.fetchers.cook_lts.requests.get")
+def test_fetch_fails_on_network_exception_and_writes_no_snapshot(
+    mock_get, tmp_path: Path
+) -> None:
+    mock_get.side_effect = requests.ConnectionError("boom")
+    result = CookLtsFetcher(layer_url=LAYER_URL).fetch(tmp_path)
+    assert result.status == "FAIL"
+    assert not (tmp_path / SNAPSHOT_FILENAME).exists()
+
+
 def test_parse_builds_way_lts_map_worst_wins(tmp_path: Path) -> None:
     snapshot = tmp_path / SNAPSHOT_FILENAME
     snapshot.write_text(json.dumps([
         {"way_id": 24072568.0, "lts": "1"},
         {"way_id": 24072568.0, "lts": "3"},   # duplicate way -> worst (3) wins
+        {"way_id": "24072568.0", "lts": "2"},  # float-as-string, same way -> 3 stays
         {"way_id": 354396977.0, "lts": "4"},
-        {"way_id": 111.0, "lts": "garbage"},  # unparseable -> skipped
-        {"way_id": 112.0, "lts": "7"},        # out of range -> skipped
+        {"way_id": 111.0, "lts": "garbage"},  # unparseable lts -> skipped
+        {"way_id": 112.0, "lts": "7"},        # out of range lts -> skipped
         {"way_id": None, "lts": "2"},         # no way id -> skipped
+        {"way_id": "garbage", "lts": "2"},    # non-numeric way id -> skipped
+        {"way_id": float("nan"), "lts": "1"},  # NaN way id -> skipped
     ]))
 
     way_lts = parse_cook_lts(snapshot)

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 
 import requests
@@ -30,6 +31,11 @@ PAGE_SIZE = 2000
 # means the county changed the layer out from under us -> surface as WARN.
 MIN_EXPECTED_RECORDS = 150_000
 VALID_LTS = (1, 2, 3, 4)
+
+
+def _fail(cache_dir: Path, msg: str) -> FetchResult:
+    """Build a FAIL FetchResult with a single warning message."""
+    return FetchResult(path=cache_dir, record_count=0, status="FAIL", warnings=[msg])
 
 
 class CookLtsFetcher(Fetcher):
@@ -66,27 +72,20 @@ class CookLtsFetcher(Fetcher):
                     timeout=self.timeout,
                 )
                 if resp.status_code != 200:
-                    return FetchResult(
-                        path=cache_dir, record_count=0, status="FAIL",
-                        warnings=[f"HTTP {resp.status_code} from {self.layer_url}"],
+                    return _fail(
+                        cache_dir, f"HTTP {resp.status_code} from {self.layer_url}"
                     )
                 data = resp.json()
                 # ArcGIS reports query errors inside a 200 body.
                 if "error" in data:
-                    return FetchResult(
-                        path=cache_dir, record_count=0, status="FAIL",
-                        warnings=[f"ArcGIS error: {data['error']}"],
-                    )
+                    return _fail(cache_dir, f"ArcGIS error: {data['error']}")
                 features = data.get("features", [])
                 records.extend(f.get("attributes", {}) for f in features)
                 if not features or not data.get("exceededTransferLimit", False):
                     break
                 offset += len(features)
         except Exception as e:  # noqa: BLE001
-            return FetchResult(
-                path=cache_dir, record_count=0, status="FAIL",
-                warnings=[f"cook_lts fetch failed: {e}"],
-            )
+            return _fail(cache_dir, f"cook_lts fetch failed: {e}")
 
         out = cache_dir / SNAPSHOT_FILENAME
         out.write_text(json.dumps(records))
@@ -111,20 +110,30 @@ def parse_cook_lts(path: Path) -> dict[str, int]:
     records = json.loads(path.read_text())
     way_lts: dict[str, int] = {}
     for rec in records:
-        way_id = rec.get("way_id")
+        raw_way = rec.get("way_id")
+        # way_id arrives as an esri double (24072568.0), but may be missing,
+        # NaN, or a non-numeric string. int(float(...)) keeps numeric strings
+        # like "24072568.0"; everything unusable is skipped (not fatal).
+        try:
+            way_num = float(raw_way)
+        except (TypeError, ValueError, OverflowError):
+            logger.warning("cook_lts: unusable way_id %r", raw_way)
+            continue
+        if not math.isfinite(way_num):
+            logger.warning("cook_lts: non-finite way_id %r", raw_way)
+            continue
+        key = str(int(way_num))
+
         raw = rec.get("lts")
         try:
             lts = int(str(raw).strip())
         except (TypeError, ValueError):
-            logger.warning("cook_lts: unparseable lts %r (way_id=%r)", raw, way_id)
+            logger.warning("cook_lts: unparseable lts %r (way_id=%r)", raw, raw_way)
             continue
         if lts not in VALID_LTS:
-            logger.warning("cook_lts: out-of-range lts %d (way_id=%r)", lts, way_id)
+            logger.warning("cook_lts: out-of-range lts %d (way_id=%r)", lts, raw_way)
             continue
-        if way_id is None:
-            logger.warning("cook_lts: record with lts=%d has no way_id", lts)
-            continue
-        key = str(int(way_id))
+
         prev = way_lts.get(key)
         if prev is None or lts > prev:
             way_lts[key] = lts
