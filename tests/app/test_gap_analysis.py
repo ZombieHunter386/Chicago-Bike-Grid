@@ -12,9 +12,18 @@ from pathlib import Path
 from app.core.gap_analysis import (
     CORRIDOR_SAVINGS_FLOOR_M,
     GapResult,
+    _TIER_MAX_LTS,
     analyze_gap,
 )
 from app.core.graph import load_graph, vertex_for_int_id
+from app.core.weights import TIERS
+
+
+def test_tier_max_lts_covers_every_tier() -> None:
+    """_TIER_MAX_LTS[tier] is a direct dict lookup in analyze_gap, so a tier
+    added or renamed in weights.py without a matching entry here would 500
+    /gap-analysis at runtime. Fail the suite instead."""
+    assert set(_TIER_MAX_LTS) == set(TIERS)
 
 
 def test_gap_no_detour_returns_empty(divergent_bikemap_db: Path) -> None:

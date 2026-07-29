@@ -1,6 +1,26 @@
+from pathlib import Path
+
 import pytest
+import yaml
 
 from app.core.weights import INF_WEIGHT, TIERS, fallback_weight_for, main_weight_for
+
+_ROUTING_WEIGHTS_YAML = (
+    Path(__file__).parents[2] / "prep" / "config" / "routing_weights.yaml"
+)
+
+
+def test_yaml_config_matches_code_tables() -> None:
+    """The module docstring claims code and prep/config/routing_weights.yaml
+    'cannot drift' because both are the single source. Enforce it: the yaml
+    tier set and every main/fallback list must equal the code tables (the
+    yaml's 1.0e+9 parses to a float equal to INF_WEIGHT)."""
+    cfg = yaml.safe_load(_ROUTING_WEIGHTS_YAML.read_text())
+    assert cfg["inf"] == INF_WEIGHT
+    assert set(cfg["tiers"]) == set(TIERS)
+    for tier, tables in TIERS.items():
+        assert cfg["tiers"][tier]["main"] == tables["main"]
+        assert cfg["tiers"][tier]["fallback"] == tables["fallback"]
 
 
 def test_four_tiers_defined() -> None:
@@ -50,8 +70,8 @@ def test_inf_weight_dominates_any_realistic_path_cost() -> None:
     result carries weight >= INF_WEIGHT. INF_WEIGHT must therefore dwarf
     any plausible weighted cost from a finite-weight path (worst case: the
     largest fallback multiplier over Chicago's diameter)."""
-    chicago_diameter_m = 50_000
-    worst_case_cost = chicago_diameter_m * 40.0
+    metro_diameter_m = 50_000
+    worst_case_cost = metro_diameter_m * 40.0
     assert INF_WEIGHT > worst_case_cost * 100
 
 

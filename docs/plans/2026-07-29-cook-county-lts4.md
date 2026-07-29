@@ -100,10 +100,11 @@ def test_fallback_weights_penalize_out_of_tier_lts() -> None:
 def test_inf_weight_dominates_any_realistic_path_cost() -> None:
     """Routing detects 'no in-tier path' by checking whether any edge in the
     result carries weight >= INF_WEIGHT. INF_WEIGHT must therefore dwarf
-    any plausible weighted cost from an all-allowed path."""
-    chicago_diameter_m = 50_000
-    worst_case_cost = chicago_diameter_m * 40.0
-    assert INF_WEIGHT > worst_case_cost * 1000
+    any plausible weighted cost from a finite-weight path (worst case: the
+    largest fallback multiplier over Chicago's diameter)."""
+    metro_diameter_m = 50_000
+    worst_case_cost = metro_diameter_m * 40.0
+    assert INF_WEIGHT > worst_case_cost * 100
 
 
 def test_invalid_lts_raises() -> None:
@@ -242,6 +243,8 @@ Expected: PASS. (If `test_smoke_real_db.py` skips without a real DB, that's fine
 git add app/core/weights.py prep/config/routing_weights.yaml tests/app/
 git commit -m "feat(weights): four personas (kid/inexperienced/experienced/death_wish) over LTS 1-4"
 ```
+
+**Deviation (approved, shipped in the Task 1 commit):** the tier-key sweep surfaced core code the step above did not anticipate — `app/core/gap_analysis.py` holds `_TIER_MAX_LTS`, a direct dict lookup (`_TIER_MAX_LTS[tier]`) that would `KeyError` (500 `/gap-analysis`) under the new tier names. It was updated from `{"kid": 1, "parent": 2, "any": 2}` to `{"kid": 1, "inexperienced": 2, "experienced": 3, "death_wish": 3}`. The top tier `death_wish` (allows LTS 1-4) is capped at 3, not 4, so LTS-4 segments still surface as gap corridors — mirroring the original `any`→2 rationale (a value equal to the tier's max makes the `lts > max` filter always-false). `app/core/gap_analysis.py` and `tests/conftest.py` were added to the `git add` alongside the planned paths. A follow-up commit added a `set(_TIER_MAX_LTS) == set(TIERS)` guard test and a yaml-vs-code drift guard test.
 
 ---
 
