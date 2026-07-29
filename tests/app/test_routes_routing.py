@@ -142,6 +142,9 @@ def test_routes_payload_carries_polyline_lts_matching_segment_count(routes_app) 
             f"{kind}: polyline_lts has {len(polyline_lts)} entries but "
             f"polyline has {len(polyline)} vertices (expected {len(polyline) - 1})"
         )
-        # Every LTS value must be 1, 2, or 3 (the only legal LTS levels).
+        # Every LTS value must be 1..4 (the legal levels on the Cook County
+        # 4-level scale). NB a DB built before the 2026-07-29 migration only
+        # contains 1..3, which is a valid subset — this must not be tightened
+        # back to (1, 2, 3) on that evidence.
         for v in polyline_lts:
-            assert v in (1, 2, 3), f"{kind}: unexpected LTS value {v}"
+            assert v in (1, 2, 3, 4), f"{kind}: unexpected LTS value {v}"
