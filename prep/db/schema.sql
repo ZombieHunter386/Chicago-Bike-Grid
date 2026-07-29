@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS streets (
     head_node_osm_id INTEGER NOT NULL,   -- PFB INTERSECTI (from-node)
     tail_node_osm_id INTEGER NOT NULL,   -- PFB INTERSE_01 (to-node)
     length_m REAL NOT NULL,
-    lts INTEGER NOT NULL,                -- 1..3
+    lts INTEGER NOT NULL,                -- 1..4
     highway TEXT,
     speed INTEGER,
     on_hin INTEGER NOT NULL DEFAULT 0,           -- 0/1 boolean
@@ -69,7 +69,7 @@ CREATE INDEX IF NOT EXISTS idx_streets_osm_id ON streets(osm_id);
 CREATE TABLE IF NOT EXISTS intersections (
     osm_id INTEGER PRIMARY KEY,          -- PFB intersection node ID
     geom BLOB NOT NULL,                  -- WKB Point (EPSG:4326)
-    lts_approach INTEGER NOT NULL,       -- 1..3
+    lts_approach INTEGER NOT NULL,       -- 1..4
     signalized INTEGER,
     lanes_crossed INTEGER,
     on_hin INTEGER NOT NULL DEFAULT 0,

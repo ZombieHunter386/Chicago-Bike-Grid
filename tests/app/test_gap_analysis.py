@@ -10,9 +10,9 @@ See gap_analysis.py module docstring for the algorithm.
 from pathlib import Path
 
 from app.core.gap_analysis import (
+    _TIER_MAX_LTS,
     CORRIDOR_SAVINGS_FLOOR_M,
     GapResult,
-    _TIER_MAX_LTS,
     analyze_gap,
 )
 from app.core.graph import load_graph, vertex_for_int_id

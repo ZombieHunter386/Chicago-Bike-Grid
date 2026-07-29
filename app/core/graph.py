@@ -44,7 +44,7 @@ class GraphSnapshot:
     # ~707k-edge attribute lists don't balloon resident memory with Python
     # object headers (Plan 2A Task 14 follow-up).
     g: ig.Graph
-    edge_seg_lts: np.ndarray                      # shape (E,) int8, values 1..3
+    edge_seg_lts: np.ndarray                      # shape (E,) int8, values 1..4
     edge_head_lts: np.ndarray                     # shape (E,) int8, lts_approach of dest vertex
     edge_length_m: np.ndarray                     # shape (E,) float64
     edge_road_id: np.ndarray                      # shape (E,) int32, source PFB ROAD_ID (max ~1M on Chicago, well within int32)
@@ -256,7 +256,7 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     # loop over g.ecount() — both faster startup AND less peak allocation.
     seg_lts_int = edge_seg_lts_arr.astype(np.int64)   # widen for safe indexing
     head_lts_int = edge_head_lts_arr.astype(np.int64)
-    eff_lts = np.maximum(seg_lts_int, head_lts_int)   # shape (E,) values 1..3
+    eff_lts = np.maximum(seg_lts_int, head_lts_int)   # shape (E,) values 1..4
     eff_idx = eff_lts - 1
 
     base_weights_by_tier: dict[str, np.ndarray] = {}

@@ -72,7 +72,7 @@ def test_inf_weight_dominates_any_realistic_path_cost() -> None:
     largest fallback multiplier over Chicago's diameter)."""
     metro_diameter_m = 50_000
     worst_case_cost = metro_diameter_m * 40.0
-    assert INF_WEIGHT > worst_case_cost * 100
+    assert worst_case_cost * 100 < INF_WEIGHT
 
 
 def test_invalid_lts_raises() -> None:

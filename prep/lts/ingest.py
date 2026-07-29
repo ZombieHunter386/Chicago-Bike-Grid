@@ -4,7 +4,7 @@
 records consumed by `prep.db.builder.DbBuilder`. They are produced by the
 scoring layer (`prep.scoring.classify_network` / `prep.scoring.intersection_tiers`)
 from the OSM graph (`prep.graph.osm_builder`) — the PFB/brokenspoke ingest that
-formerly lived here has been removed (Mellow + CDOT scoring, Phase 5).
+formerly lived here has been removed (Cook County LTS scoring, 2026-07-29).
 
 `PoiRecord` plus the `ingest_osm_pois` / `ingest_cdp_pois` helpers read the
 GeoJSON POI snapshots written by the OSM and CDP fetchers.
@@ -26,7 +26,7 @@ class SegmentRecord:
     head_int_id: int         # OSM node id (from-node)
     tail_int_id: int         # OSM node id (to-node)
     name: str | None
-    lts: int  # final stress tier (1..3) from Mellow + CDOT
+    lts: int  # final LTS (1..4) from the Cook County way-ID join
     highway: str | None
     speed: int | None
     ft_int_str: int | None   # intersection LTS at the FT (forward) end

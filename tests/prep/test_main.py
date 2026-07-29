@@ -7,7 +7,6 @@ import networkx as nx
 from shapely.geometry import LineString
 
 from prep.fetchers.base import FetchResult
-from prep.fetchers.mellow import MellowFeature
 from prep.main import PipelineResult, _hin_features_from_geojson, run_pipeline
 
 
@@ -44,23 +43,11 @@ sources:
     domain: "data.cityofchicago.org"
     dataset_id: "test-speed-id"
     refresh_cadence: "monthly"
-  mellow:
-    name: "Mellow Bike Map"
-    type: "github_fixture"
-    fixtures_repo: "jeancochrane/mellow-bike-map"
-    fixtures_path: "app/mbm/fixtures/"
-    refresh_cadence: "quarterly"
-  cdot_bike_network:
-    name: "CDOT Bikeway Network"
-    type: "arcgis_feature_service"
-    on_street_url: "https://example.com/cdot_on"
-    facility_type_field: "BIKE_DSPLY"
-    refresh_cadence: "quarterly"
-  cdot_off_street_trails:
-    name: "CDOT Off-Street Trails"
-    type: "arcgis_feature_service"
-    trails_url: "https://example.com/cdot_off"
-    refresh_cadence: "quarterly"
+  cook_lts:
+    name: "Cook County LTS 2023"
+    type: "arcgis_mapserver_layer"
+    layer_url: "https://example.com/DOTH_expanded/MapServer/14"
+    refresh_cadence: "annual"
   cdp_alderman_offices:
     name: "CDP Alderman Offices"
     type: "socrata"
@@ -84,12 +71,10 @@ target:
     )
 
 
-@patch("prep.main.parse_cdot_facilities")
-@patch("prep.main.parse_mellow_features")
+@patch("prep.main.parse_cook_lts")
 @patch("prep.main.build_graph_from_bbox")
 @patch("prep.main.OsmPoisFetcher")
-@patch("prep.main.CdotFacilitiesFetcher")
-@patch("prep.main.MellowFetcher")
+@patch("prep.main.CookLtsFetcher")
 @patch("prep.main.SpeedLimitsFetcher")
 @patch("prep.main.CdpPoisFetcher")
 @patch("prep.main.HinFetcher")
@@ -97,12 +82,10 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     mock_hin: MagicMock,
     mock_cdp: MagicMock,
     mock_speed: MagicMock,
-    mock_mellow: MagicMock,
-    mock_cdot_fac: MagicMock,
+    mock_cook_lts: MagicMock,
     mock_osm_pois: MagicMock,
     mock_build_graph: MagicMock,
-    mock_parse_mellow: MagicMock,
-    mock_parse_cdot: MagicMock,
+    mock_parse_cook_lts: MagicMock,
     tmp_path: Path,
     fixtures_dir: Path,
 ) -> None:
@@ -119,19 +102,15 @@ def test_run_pipeline_happy_path_writes_db_and_report(
 
     mock_hin.return_value.fetch.return_value = _ok(50)
     mock_speed.return_value.fetch.return_value = _ok(200)
-    mock_mellow.return_value.fetch.return_value = _ok(300)
-    mock_cdot_fac.return_value.fetch.return_value = _ok(900)
+    mock_cook_lts.return_value.fetch.return_value = _ok(207_000)
     mock_cdp.return_value.fetch.return_value = _ok(60)
     mock_osm_pois.return_value.fetch.return_value = _ok(20)
 
     # Graph -> 2 edges (osm ways 111, 222), 3 nodes.
     mock_build_graph.return_value = _make_graph()
-    # Mellow makes way 111 a protected path (tier 1); way 222 is absent from
-    # Mellow and an arterial (highway=primary) -> road-class baseline tier 3.
-    mock_parse_mellow.return_value = [
-        MellowFeature(kind="path", way_ids=frozenset({"111"}), slug="p", name="Path"),
-    ]
-    mock_parse_cdot.return_value = []
+    # The county rates way 111 as LTS 1; way 222 is absent from the 2023
+    # snapshot and is an arterial (highway=primary) -> road-class fallback 4.
+    mock_parse_cook_lts.return_value = {"111": 1}
 
     result = run_pipeline(
         config_path=cfg_path,
@@ -145,6 +124,10 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     assert result.status == "OK"
     assert db_path.exists()
     assert (tmp_path / "prep_report.md").exists()
+    # ClassifyStats must reach the report: 1 of 2 edges matched a county way_id.
+    report_md = (tmp_path / "prep_report.md").read_text()
+    assert "## LTS way-ID match rate" in report_md
+    assert "1 (50.0%)" in report_md
     assert (db_path.parent / "lts-network.geojson.gz").exists()
     assert (db_path.parent / "lts-network.geojson.gz").stat().st_size > 0
 
@@ -162,13 +145,14 @@ def test_run_pipeline_happy_path_writes_db_and_report(
     assert streets_count == 2, f"expected 2 streets from graph, got {streets_count}"
     # 2 edges share node 11: 3 unique intersection nodes total.
     assert ints_count == 3, f"expected 3 intersections, got {ints_count}"
-    # Mellow path on way 111 -> tier 1; way 222 (primary, no Mellow) -> tier 3.
-    assert lts_values == [1, 3], f"expected tiers [1, 3], got {lts_values}"
+    # County LTS 1 on way 111; way 222 (primary, unmatched) -> road-class 4.
+    assert lts_values == [1, 4], f"expected LTS [1, 4], got {lts_values}"
     meta_sources = {row[0] for row in meta_rows}
     assert "hin" in meta_sources
     assert "chicago_speed_limits" in meta_sources
-    assert "mellow" in meta_sources
-    assert "cdot_facilities" in meta_sources
+    assert "cook_lts" in meta_sources
+    assert "mellow" not in meta_sources
+    assert "cdot_facilities" not in meta_sources
     assert "cdp_pois" in meta_sources
     assert "osm_pois" in meta_sources
     assert "brokenspoke" not in meta_sources

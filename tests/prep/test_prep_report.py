@@ -18,14 +18,14 @@ def test_prep_report_includes_per_source_status_and_deltas(tmp_path: Path) -> No
             warnings=[],
         ),
         SourceRunSummary(
-            name="cdot_facilities",
+            name="cook_lts",
             status="WARN",
             record_count=400,
             previous_record_count=420,
             warnings=["3 rows missing geometry"],
         ),
         SourceRunSummary(
-            name="mellow",
+            name="osm_pois",
             status="OK",
             record_count=80000,
             previous_record_count=None,

@@ -18,24 +18,14 @@ from prep.config_loader import load_sources_config
 from prep.db.builder import DbBuilder
 from prep.db.treatments_loader import load_treatments
 from prep.fetchers.base import rotate_snapshots, today_snapshot_dir
-from prep.fetchers.cdot_facilities import (
-    OFF_STREET_FILENAME as CDOT_OFF_STREET_FILENAME,
+from prep.fetchers.cook_lts import (
+    SNAPSHOT_FILENAME as COOK_LTS_FILENAME,
 )
-from prep.fetchers.cdot_facilities import (
-    ON_STREET_FILENAME as CDOT_ON_STREET_FILENAME,
-)
-from prep.fetchers.cdot_facilities import (
-    CdotFacilitiesFetcher,
-    parse_cdot_facilities,
+from prep.fetchers.cook_lts import (
+    CookLtsFetcher,
+    parse_cook_lts,
 )
 from prep.fetchers.hin import HinFetcher
-from prep.fetchers.mellow import (
-    FIXTURE_FILENAME as MELLOW_FIXTURE_FILENAME,
-)
-from prep.fetchers.mellow import (
-    MellowFetcher,
-    parse_mellow_features,
-)
 from prep.fetchers.pois_cdp import CdpPoisFetcher
 from prep.fetchers.pois_osm import OsmPoisFetcher
 from prep.fetchers.speed_limits import SpeedLimitsFetcher
@@ -63,7 +53,7 @@ from prep.lts_network_export import export_lts_network
 from prep.reporting.hin_match_report import build_hin_match_report
 from prep.reporting.lts_diff import diff_lts_against_previous
 from prep.reporting.prep_report import SourceRunSummary, build_prep_report
-from prep.scoring.classify_network import classify_network
+from prep.scoring.classify_network import ClassifyStats, classify_network
 from prep.scoring.intersection_tiers import build_intersection_records
 
 CODE_VERSION = "0.1.0"
@@ -221,29 +211,12 @@ def run_pipeline(
             previous_record_count=None, warnings=r.warnings,
         ))
 
-    mellow_src = cfg.sources.get("mellow")
-    if mellow_src is not None:
-        mellow = MellowFetcher(
-            fixtures_repo=mellow_src.extra["fixtures_repo"],
-            fixtures_path=mellow_src.extra["fixtures_path"],
-        )
-        r = mellow.fetch(snapshot_dir)
+    cook_lts_src = cfg.sources.get("cook_lts")
+    if cook_lts_src is not None:
+        cook_lts = CookLtsFetcher(layer_url=cook_lts_src.extra["layer_url"])
+        r = cook_lts.fetch(snapshot_dir)
         sources.append(SourceRunSummary(
-            name="mellow", status=r.status, record_count=r.record_count,
-            previous_record_count=None, warnings=r.warnings,
-        ))
-
-    cdot_net_src = cfg.sources.get("cdot_bike_network")
-    cdot_trails_src = cfg.sources.get("cdot_off_street_trails")
-    if cdot_net_src is not None and cdot_trails_src is not None:
-        cdot_fac = CdotFacilitiesFetcher(
-            on_street_url=cdot_net_src.extra["on_street_url"],
-            facility_type_field=cdot_net_src.extra["facility_type_field"],
-            trails_url=cdot_trails_src.extra["trails_url"],
-        )
-        r = cdot_fac.fetch(snapshot_dir)
-        sources.append(SourceRunSummary(
-            name="cdot_facilities", status=r.status, record_count=r.record_count,
+            name="cook_lts", status=r.status, record_count=r.record_count,
             previous_record_count=None, warnings=r.warnings,
         ))
 
@@ -317,7 +290,10 @@ def run_pipeline(
         report_path.write_text(report)
         return PipelineResult(status="FAIL", sources=sources)
 
-    # 5. Build new DB to a temp path; swap atomically only on success
+    # 5. Build new DB to a temp path; swap atomically only on success.
+    # classify_stats stays None if the build fails before classification, so the
+    # report simply omits the match-rate section rather than reporting zeros.
+    classify_stats: ClassifyStats | None = None
     tmp_fd, tmp_name = tempfile.mkstemp(suffix=".db", dir=db_path.parent)
     os.close(tmp_fd)
     tmp_db = Path(tmp_name)
@@ -325,7 +301,7 @@ def run_pipeline(
         builder = DbBuilder(tmp_db)
         builder.create_schema()
 
-        # Topology from OSM (osmnx); tier from Mellow (baseline) + CDOT (override).
+        # Topology from OSM (osmnx); LTS 1-4 from the Cook County way-ID join.
         # Prune to the routable network *after* osmnx's build: removing service
         # roads (alleys) orphans the intersections that only touched them, so we
         # re-take the largest weakly-connected component to drop those dead
@@ -334,22 +310,13 @@ def run_pipeline(
         edges = list(build_street_edges(graph))
         nodes = list(build_nodes(graph))
 
-        mellow_features = (
-            list(parse_mellow_features(snapshot_dir / MELLOW_FIXTURE_FILENAME))
-            if mellow_src is not None
-            else []
-        )
-        cdot_facilities = (
-            list(parse_cdot_facilities(
-                snapshot_dir / CDOT_ON_STREET_FILENAME,
-                snapshot_dir / CDOT_OFF_STREET_FILENAME,
-                cdot_net_src.extra["facility_type_field"],
-            ))
-            if cdot_net_src is not None and cdot_trails_src is not None
-            else []
+        way_lts = (
+            parse_cook_lts(snapshot_dir / COOK_LTS_FILENAME)
+            if cook_lts_src is not None
+            else {}
         )
 
-        segs = classify_network(edges, mellow_features, cdot_facilities)
+        segs, classify_stats = classify_network(edges, way_lts)
         ints = build_intersection_records(nodes, segs)
 
         pois = list(ingest_osm_pois(snapshot_dir))
@@ -449,6 +416,7 @@ def run_pipeline(
         lts_diff_path=report_path.parent / "lts_diff.md",
         hin_match_report_path=report_path.parent / "hin_match_report.md",
         lts_network_size_bytes=lts_network_size,
+        lts_stats=classify_stats,
     )
     report_path.write_text(report)
 

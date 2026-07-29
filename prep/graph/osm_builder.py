@@ -11,7 +11,7 @@ Gotchas handled here (plan review F2/F3):
     (min_lat, max_lat, min_lng, max_lng), so reorder via `bbox_to_osmnx`.
   - Simplified osmnx edges carry a *list* of `osmid`s and sometimes a list
     `name`/`highway`; collapse to a single value for the schema, but keep the
-    full osmid list (`osm_way_ids`) for the Mellow way-ID join in Phase 4.
+    full osmid list (`osm_way_ids`) for the Cook County LTS way-ID join.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class OsmEdge:
 
     road_id: int  # synthesized stable unique int — HIN match key (passed as OsmSegment.osm_id)
     osm_id: int  # single OSM way id for the schema (first of the osmid list)
-    osm_way_ids: tuple[str, ...]  # all OSM way ids on this edge — Mellow way-id join key
+    osm_way_ids: tuple[str, ...]  # all OSM way ids on this edge — county LTS join key
     head_node_id: int  # osmnx u
     tail_node_id: int  # osmnx v
     name: str | None
@@ -60,7 +60,7 @@ def bbox_to_osmnx(
 
 # OSM highway classes excluded from the routable/displayed network. `service`
 # covers alleys, driveways, and parking aisles — not useful bike routes, and
-# Mellow ignores them entirely.
+# They are not useful bike routes.
 _EXCLUDED_HIGHWAYS = frozenset({"service"})
 
 
@@ -145,7 +145,7 @@ def build_street_edges(graph: nx.MultiDiGraph) -> Iterator[OsmEdge]:
     monotonic counter (stable for a given deterministic graph build).
 
     Service roads (``highway=service`` — alleys, driveways, parking aisles) are
-    skipped: Mellow ignores them entirely, they aren't useful bike routes, and
+    skipped: they aren't useful bike routes, and
     left in they make up ~half of all OSM ways, dominating the map as clutter.
     """
     road_id = 0
