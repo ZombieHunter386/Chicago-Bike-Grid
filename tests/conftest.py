@@ -122,6 +122,65 @@ def tiny_bikemap_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def divergent_lts4_bikemap_db(tmp_path: Path) -> Path:
+    """Triangle where the fast route is LTS 4 and the safe detour is LTS 1.
+
+                        v20  (apex, +0.0054 lat)
+                       /   \\
+        [r1: lts=1, 729m]   [r2: lts=1, 729m]
+                     /       \\
+        v10 ──[r3: lts=4, 829m, primary]── v40
+
+    Exists to prove corridor enumeration actually *finds* an LTS-4 segment.
+    `lts4_bikemap_db` cannot: it is a 3-node line, so fast and safe share an
+    edge path and analyze_gap short-circuits to empty_result before reaching
+    the enumeration. Here the two routes genuinely diverge.
+
+    This is the only fixture that guards the deliberate off-by-one in
+    `_TIER_MAX_LTS['death_wish'] = 3`. Enumeration is `seg_lts > tier_max_lts`,
+    so "correcting" that 3 to the tier's true max of 4 makes the filter
+    `lts > 4` — always false, silently returning zero corridors for the
+    default persona.
+
+    Geometry is load-bearing; the leg lengths satisfy
+    `1.5 x direct < detour < 2.0 x direct` (actual ratio 1.759):
+      - Upper bound: an LTS-4 edge costs 2.0x under death_wish main weights,
+        so 829 x 2.0 = 1659 > 1458 detour -> the safe route takes the detour
+        and diverges from fast. Above 2.0x, safe would reuse the direct edge
+        and short-circuit.
+      - Lower bound: an upgraded edge is re-weighted to `tier_max_lts` (3 ->
+        1.5x), NOT to 1. At exactly 1.5x, 829 x 1.5 = 1244 would tie the
+        detour and igraph could pick either path, making savings
+        non-deterministic. At 1.759x the upgraded direct edge wins outright.
+
+    Resulting arithmetic at death_wish: fast = r3 (829m), safe = detour
+    (1458m), hypothesized r3-at-LTS-3 = 1244 < 1458 so safe flips to r3 ->
+    savings = 1458 - 829 = 629m, comfortably over CORRIDOR_SAVINGS_FLOOR_M.
+    All intersections are lts_approach=1 so no intersection candidates appear
+    and the assertions isolate segment behavior.
+    """
+    db_path = tmp_path / "bikemap.db"
+    builder = DbBuilder(db_path)
+    builder.create_schema()
+    builder.insert_intersections([
+        _intersection(10, 41.940, -87.680, 1),   # v10 west end
+        _intersection(20, 41.9454, -87.675, 1),  # v20 apex
+        _intersection(40, 41.940, -87.670, 1),   # v40 east end
+    ])
+    builder.insert_streets([
+        # Detour legs, LTS 1 (~729m each).
+        _seg(201, 3001, 10, 20, 1, [(-87.680, 41.940), (-87.675, 41.9454)]),
+        _seg(202, 3002, 20, 40, 1, [(-87.675, 41.9454), (-87.670, 41.940)]),
+        # Direct arterial, LTS 4 (~829m) — the corridor candidate.
+        _seg(203, 3003, 10, 40, 4, [(-87.680, 41.940), (-87.670, 41.940)],
+             highway="primary"),
+    ])
+    builder.record_schema_meta(code_version="test")
+    builder.close()
+    return db_path
+
+
+@pytest.fixture
 def lts4_bikemap_db(tmp_path: Path) -> Path:
     """3-node line containing an LTS-4 street, for full-scale coverage.
 

@@ -188,3 +188,62 @@ def test_gap_roads_sorted_by_marginal_loss_descending(
     assert res.corridor is not None
     losses = [r.marginal_loss_m for r in res.corridor.roads]
     assert losses == sorted(losses, reverse=True)
+
+
+def test_gap_death_wish_enumerates_lts4_segment_as_corridor(
+    divergent_lts4_bikemap_db: Path,
+) -> None:
+    """An LTS-4 street on the fast route must surface as a fixable corridor
+    at the default 'death_wish' persona.
+
+    This is the behavioral guard on the deliberate off-by-one at
+    `_TIER_MAX_LTS['death_wish'] = 3`. Enumeration is `seg_lts > tier_max_lts`;
+    raising that 3 to the tier's true max of 4 makes the filter `lts > 4`,
+    which is always false, so this returns an empty result instead of the
+    corridor below. `test_tier_max_lts_covers_every_tier` only checks that the
+    key set matches TIERS — it cannot catch a wrong *value*.
+    """
+    snap = load_graph(divergent_lts4_bikemap_db)
+    v10 = vertex_for_int_id(snap, 10)
+    v40 = vertex_for_int_id(snap, 40)
+    assert v10 is not None and v40 is not None
+
+    res = analyze_gap(snap, v10, v40, "death_wish")
+
+    # Fast takes the short LTS-4 arterial; safe detours over the LTS-1 legs.
+    assert res.fast_route.length_m < res.safe_route.length_m
+    assert res.safe_route_is_fallback is False
+
+    assert res.corridor is not None, (
+        "LTS-4 segment was not enumerated — _TIER_MAX_LTS['death_wish'] must "
+        "stay 3 so `seg_lts > tier_max_lts` can still match an LTS 4"
+    )
+    assert [r.name for r in res.corridor.roads] == ["Test St 203"]
+    # Upgrading the arterial lets the safe route use it: 1458m detour -> 829m.
+    expected = res.safe_route.length_m - res.fast_route.length_m
+    assert abs(res.corridor.combined_savings_m - expected) < 1.0
+    assert res.corridor.combined_savings_m > CORRIDOR_SAVINGS_FLOOR_M
+    # Safe was already in-tier (LTS-1 detour), so nothing "flips".
+    assert res.corridor.flips_to_fully_safe is False
+    # All intersections are lts_approach=1, so the segment is the only finding.
+    assert res.intersections == ()
+
+
+def test_gap_experienced_tier_also_enumerates_lts4_segment(
+    divergent_lts4_bikemap_db: Path,
+) -> None:
+    """The same LTS-4 arterial is a corridor at 'experienced' (LTS 1-3).
+
+    Here the arterial is genuinely out of tier (main weight INF), so this
+    passes under any tier_max value that is < 4 — unlike the death_wish case
+    above. Included so the two personas are shown to agree on the finding.
+    """
+    snap = load_graph(divergent_lts4_bikemap_db)
+    v10 = vertex_for_int_id(snap, 10)
+    v40 = vertex_for_int_id(snap, 40)
+
+    res = analyze_gap(snap, v10, v40, "experienced")
+
+    assert res.corridor is not None
+    assert [r.name for r in res.corridor.roads] == ["Test St 203"]
+    assert res.corridor.combined_savings_m > CORRIDOR_SAVINGS_FLOOR_M

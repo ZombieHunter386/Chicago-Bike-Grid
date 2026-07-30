@@ -23,14 +23,15 @@ and never mutated after construction.
 from __future__ import annotations
 
 import sqlite3
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import igraph as ig
 import numpy as np
+import shapely
 from pyproj import Transformer
 from scipy.spatial import cKDTree
-from shapely import wkb
 
 from app.core.weights import TIERS
 
@@ -144,17 +145,29 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     vertex_lts_approach = np.empty(n_vertices, dtype=np.int8)
     vertex_on_hin = np.empty(n_vertices, dtype=bool)
 
+    # Scalar per-row work only; geometry is handled in one vectorized pass
+    # below. Parsing each Point through shapely and reading .x/.y per row cost
+    # ~35 s of a ~175 s boot on the 353k-street graph: every attribute access
+    # crosses the shapely decorator wrapper, and every point paid a separate
+    # pyproj call.
     for idx, r in enumerate(int_rows):
         int_id = int(r["osm_id"])
         int_id_to_vertex[int_id] = idx
         vertex_to_int_id_arr[idx] = int_id
-        pt = wkb.loads(r["geom"])
-        coords_wgs84_arr[idx, 0] = pt.y  # lat
-        coords_wgs84_arr[idx, 1] = pt.x  # lon
-        x_m, y_m = _TO_IL_EAST_M(pt.x, pt.y)
-        coords_proj[idx] = (x_m, y_m)
         vertex_lts_approach[idx] = int(r["lts_approach"])
         vertex_on_hin[idx] = bool(r["on_hin"])
+
+    if n_vertices:
+        # from_wkb/get_coordinates operate on whole arrays in C. Points always
+        # yield exactly one coordinate pair each, so row order is preserved.
+        pt_coords = shapely.get_coordinates(
+            shapely.from_wkb([r["geom"] for r in int_rows])
+        )
+        coords_wgs84_arr[:, 0] = pt_coords[:, 1]  # lat
+        coords_wgs84_arr[:, 1] = pt_coords[:, 0]  # lon
+        vx, vy = _TO_IL_EAST_M(pt_coords[:, 0], pt_coords[:, 1])
+        coords_proj[:, 0] = vx
+        coords_proj[:, 1] = vy
 
     kdtree = cKDTree(coords_proj)
 
@@ -186,8 +199,8 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     road_names: list[str | None] = []
     road_heads: list[int] = []
     road_tails: list[int] = []
-    bboxes: list[tuple[float, float, float, float]] = []
-    endpoints: list[tuple[float, float, float, float]] = []
+    # Raw WKB per road; projected in one vectorized pass after the loop.
+    road_geom_blobs: list[bytes] = []
 
     for r in con.execute(sql):
         h_int = int(r["head_node_osm_id"])
@@ -216,28 +229,69 @@ def load_graph(db_path: Path) -> GraphSnapshot:
         length_m.append(ll)
         road_id_per_edge.append(rid)
 
-        # Per-road_id metadata + projected bbox/endpoints for gap analysis.
-        line = wkb.loads(r["geom"])
-        # Project all coordinates of the LineString to EPSG:6454 once.
-        proj_coords = [_TO_IL_EAST_M(x, y) for (x, y) in line.coords]
-        xs = [c[0] for c in proj_coords]
-        ys = [c[1] for c in proj_coords]
-        head_x, head_y = proj_coords[0]
-        tail_x, tail_y = proj_coords[-1]
+        # Geometry is deferred to one vectorized pass after the loop (see
+        # below); here we only stash the raw WKB.
+        road_geom_blobs.append(r["geom"])
 
         road_ids.append(rid)
         road_osm.append(int(r["osm_id"]))
         road_lts.append(sl)
         road_lengths.append(ll)
         road_on_hin.append(on_hin)
-        road_highways.append(hw)
-        road_names.append(nm)
+        # Intern both: sqlite hands back a fresh str object per row, so the
+        # ~15 distinct `highway` values and the heavily-repeated street names
+        # (one road_id per block, so a long street repeats hundreds of times)
+        # were each paying a full string allocation per row — 23 MB and 17 MB
+        # respectively on the 353k-road graph. Interning keeps the exact same
+        # values and the same list[str | None] type; only the object identity
+        # is shared, so no consumer changes.
+        road_highways.append(sys.intern(hw) if hw is not None else None)
+        road_names.append(sys.intern(nm) if nm is not None else None)
         road_heads.append(h_int)
         road_tails.append(t_int)
-        bboxes.append((min(xs), min(ys), max(xs), max(ys)))
-        endpoints.append((head_x, head_y, tail_x, tail_y))
 
     con.close()
+
+    # ---- Vectorized projected bbox + endpoints (replaces per-road shapely) ------
+    # Previously this was `wkb.loads` per road plus one pyproj call per
+    # coordinate — 353k WKB parses and 1.09M transform calls, the dominant
+    # cost of a ~175 s boot. Now: one from_wkb over all blobs, one
+    # get_coordinates, one pyproj call for every coordinate in the graph, and
+    # reduceat to fold them back per road.
+    n_geoms = len(road_geom_blobs)
+    if n_geoms:
+        geoms = shapely.from_wkb(road_geom_blobs)
+        counts = shapely.get_num_coordinates(geoms)
+        if (counts == 0).any():
+            # reduceat would silently mis-segment on an empty geometry, and a
+            # street with no coordinates has no meaningful bbox anyway.
+            raise ValueError("street geometry with zero coordinates in bikemap.db")
+        flat = shapely.get_coordinates(geoms)          # (sum(counts), 2) lon/lat
+        fx, fy = _TO_IL_EAST_M(flat[:, 0], flat[:, 1])  # single pyproj call
+        fx = np.asarray(fx)
+        fy = np.asarray(fy)
+        # Start offset of each road's coordinate run; last index of each run.
+        starts = np.empty(n_geoms, dtype=np.int64)
+        starts[0] = 0
+        np.cumsum(counts[:-1], out=starts[1:])
+        ends = starts + counts - 1
+
+        bbox_arr = np.empty((n_geoms, 4), dtype=np.float64)
+        bbox_arr[:, 0] = np.minimum.reduceat(fx, starts)
+        bbox_arr[:, 1] = np.minimum.reduceat(fy, starts)
+        bbox_arr[:, 2] = np.maximum.reduceat(fx, starts)
+        bbox_arr[:, 3] = np.maximum.reduceat(fy, starts)
+
+        endpoint_arr = np.empty((n_geoms, 4), dtype=np.float64)
+        endpoint_arr[:, 0] = fx[starts]
+        endpoint_arr[:, 1] = fy[starts]
+        endpoint_arr[:, 2] = fx[ends]
+        endpoint_arr[:, 3] = fy[ends]
+        del geoms, flat, fx, fy
+    else:
+        bbox_arr = np.empty((0, 4), dtype=np.float64)
+        endpoint_arr = np.empty((0, 4), dtype=np.float64)
+    road_geom_blobs.clear()
 
     g = ig.Graph(n=n_vertices, edges=edges, directed=True)
 
@@ -264,14 +318,32 @@ def load_graph(db_path: Path) -> GraphSnapshot:
     for tier_name, tables in TIERS.items():
         main_w = np.asarray(tables["main"], dtype=np.float64)       # shape (4,)
         fb_w = np.asarray(tables["fallback"], dtype=np.float64)     # shape (4,)
-        base_weights_by_tier[tier_name] = edge_length_m_arr * main_w[eff_idx]
-        fallback_weights_by_tier[tier_name] = edge_length_m_arr * fb_w[eff_idx]
+        main_arr = edge_length_m_arr * main_w[eff_idx]
+        base_weights_by_tier[tier_name] = main_arr
+        # The top tier allows every LTS, so its fallback table is identical to
+        # its main table (nothing is out of tier to penalize) — materializing a
+        # second copy costs ~5.7 MB per 707k-edge graph for byte-identical data.
+        # Alias instead. Safe because GraphSnapshot is documented read-only and
+        # never mutated after construction; every consumer that needs to modify
+        # weights (gap_analysis hypotheses) already .copy()s first.
+        if np.array_equal(main_w, fb_w):
+            fallback_weights_by_tier[tier_name] = main_arr
+        else:
+            fallback_weights_by_tier[tier_name] = edge_length_m_arr * fb_w[eff_idx]
 
     # ---- Convert per-road lists to numpy arrays ---------------------------------
     # road_id_array stays in load order so the (2k, 2k+1) edge-pair invariant
     # in edges_for_road_id() holds. road_id_sorted + road_id_sorted_to_load_pos
     # give a fast searchsorted lookup that yields the load-order position.
     n_roads = len(road_ids)
+    # bbox/endpoint rows are now produced by a separate vectorized pass rather
+    # than appended inside the row loop, so their alignment with the per-road
+    # arrays is no longer structural. Pin it: a mismatch would silently give
+    # every road the wrong geometry in gap analysis.
+    if bbox_arr.shape[0] != n_roads or endpoint_arr.shape[0] != n_roads:
+        raise AssertionError(
+            f"geometry rows ({bbox_arr.shape[0]}) != road rows ({n_roads})"
+        )
     road_id_array = np.asarray(road_ids, dtype=np.int32)
     road_id_sort_perm = np.argsort(road_id_array, kind="stable")
     road_id_sorted_arr = road_id_array[road_id_sort_perm]  # int32, indexed copy
@@ -304,8 +376,8 @@ def load_graph(db_path: Path) -> GraphSnapshot:
         road_name_list=road_names,
         road_head_int_id_array=np.asarray(road_heads, dtype=np.int64),
         road_tail_int_id_array=np.asarray(road_tails, dtype=np.int64),
-        road_bbox_proj=np.asarray(bboxes, dtype=np.float64).reshape(n_roads, 4) if n_roads else np.empty((0, 4)),
-        road_endpoints_proj=np.asarray(endpoints, dtype=np.float64).reshape(n_roads, 4) if n_roads else np.empty((0, 4)),
+        road_bbox_proj=bbox_arr,
+        road_endpoints_proj=endpoint_arr,
     )
 
 
