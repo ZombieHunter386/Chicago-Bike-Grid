@@ -90,10 +90,11 @@ def build_graph_from_bbox(
     """
     import osmnx as ox
 
-    # Route osmnx's Overpass response cache under data/cache/ (gitignored).
-    # Left unset, osmnx defaults to `./cache` at the cwd — i.e. the repo root,
-    # which is NOT gitignored and would get littered by a real `make refresh`.
-    ox.settings.cache_folder = "data/cache/osmnx"
+    from prep.osm_config import configure_osmnx
+
+    # Shared cache dir (data/cache/, gitignored — left unset osmnx defaults to
+    # `./cache` at the repo root) + the OVERPASS_URL-configurable endpoint.
+    configure_osmnx(ox)
 
     return ox.graph_from_bbox(
         bbox_to_osmnx(target_bbox),

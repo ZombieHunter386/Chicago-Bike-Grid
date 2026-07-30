@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from prep.fetchers.base import Fetcher, FetchResult
+from prep.osm_config import configure_osmnx
 
 logger = logging.getLogger(__name__)
 
@@ -72,17 +73,16 @@ class OsmPoisFetcher(Fetcher):
         # NB: lazy import — osmnx is heavyweight; avoid loading on test collection.
         import osmnx as ox
 
-        # Defensive HTTP timeout. Belt+suspenders: this catches the common
-        # case (slow server) but NOT a CLOSE_WAIT hang where the socket is
-        # half-closed and our process never notices. The signal-based alarm
-        # in `_fetch_category` covers that backstop.
-        ox.settings.requests_timeout = 120
-
-        # Route osmnx's Overpass response cache under data/cache/ (gitignored).
-        # This fetcher runs *before* the graph builder, so we can't rely on the
-        # builder's setting — left unset, osmnx defaults to `./cache` at the cwd
-        # (the repo root, NOT gitignored) and litters it on every prep run.
-        ox.settings.cache_folder = "data/cache/osmnx"
+        # Shared cache dir + configurable Overpass endpoint. Defensive HTTP
+        # timeout of 120s is belt+suspenders: it catches the common case (slow
+        # server) but NOT a CLOSE_WAIT hang where the socket is half-closed and
+        # our process never notices — the signal-based alarm in
+        # `_fetch_category` covers that backstop.
+        #
+        # The cache setting must happen here as well as in the graph builder:
+        # this fetcher runs *first*, and left unset osmnx defaults to `./cache`
+        # at the cwd (the repo root, NOT gitignored).
+        configure_osmnx(ox, requests_timeout=120)
 
         warnings: list[str] = []
         total = 0
