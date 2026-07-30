@@ -1,10 +1,12 @@
 # Chicago Bike Grid
 
-A public web tool that turns a Chicago resident's home address and personal destinations into a printable, shareable advocacy artifact showing where bike infrastructure investment would most change their life.
+A public web tool that turns a Cook County resident's home address and personal destinations into a printable, shareable advocacy artifact showing where bike infrastructure investment would most change their life.
+
+Coverage is all of Cook County, Illinois (expanded from the City of Chicago on 2026-07-30). The service area is set by `target.bbox` in `prep/config/sources.yaml`; the geocoder's Nominatim viewbox is pinned to the same bounds by a test, since addresses outside it cannot be routed.
 
 Two views ship in v1:
 - **Advocacy view** (`/`): enter your home address, pick destinations, see fast vs. safe routes and the avoided-intersections worth fixing. Routes are planned for one of four riders — *Safe for kid* (LTS 1), *Inexperienced* (LTS 1–2), *Experienced* (LTS 1–3), or *Death wish* (LTS 1–4).
-- **LTS Data Explorer** (`/explore`): the underlying Level-of-Traffic-Stress network for the whole city, colored by stress on the four-level scale, with an optional High-Injury Network overlay.
+- **LTS Data Explorer** (`/explore`): the underlying Level-of-Traffic-Stress network for the whole county, colored by stress on the four-level scale, with an optional High-Injury Network overlay.
 
 ## Street stress (LTS)
 
@@ -25,7 +27,7 @@ Every street carries a Level of Traffic Stress from 1 (calm) to 4 (hostile), the
 ## Usage
 
 ```bash
-# Run the full prep pipeline (~30-90 min for Chicago) — produces data/bikemap.db
+# Run the full prep pipeline (a few hours for Cook County) — produces data/bikemap.db
 # and data/lts-network.geojson.gz
 make refresh
 

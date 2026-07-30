@@ -85,9 +85,26 @@ sources:
     refresh_cadence: "monthly"
 
 target:
-  name: "Chicago"
+  name: "Cook County"
+  # Expanded from the City of Chicago to all of Cook County (2026-07-30).
+  # Bounds from Nominatim's Cook County, Illinois relation:
+  #   S 41.4697  N 42.1543  W -88.2636  E -87.1105
+  # The eastern edge is clipped to -87.5240 (the previous Chicago value):
+  # the county's legal boundary runs out into Lake Michigan to -87.11, which
+  # holds no streets, and every degree of empty water still costs an Overpass
+  # sub-query because osmnx tiles the bbox above its 2.5e9 m2 query limit.
+  # The furthest-east land feature (Navy Pier, ~-87.58) is comfortably inside.
+  #
+  # Resulting area is ~3.2x the old Chicago bbox, so expect a correspondingly
+  # larger graph, longer prep run, and bigger lts-network export.
+  #
+  # Coverage note: the Cook County LTS layer spans the whole metro area, and
+  # the CMAP HIN is county-wide, so both extend cleanly. The CDOT bikeway
+  # layers and the CDP POI datasets are City-of-Chicago only, so suburban
+  # Cook gets county LTS + road-class fallback with no CDOT override — which
+  # is correct, since CDOT has no jurisdiction there.
   bbox:
-    min_lat: 41.6440
-    max_lat: 42.0230
-    min_lng: -87.9402
+    min_lat: 41.4697
+    max_lat: 42.1543
+    min_lng: -88.2636
     max_lng: -87.5240

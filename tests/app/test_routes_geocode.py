@@ -1,5 +1,8 @@
 """Tests for /geocode proxy."""
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def _make_app():
@@ -77,11 +80,16 @@ def test_geocode_suggest_short_query_returns_empty_without_calling_nominatim() -
         mock_fetch.assert_not_called()
 
 
-def test_fetch_nominatim_bounds_results_to_chicago() -> None:
-    """Prefilled suggestions must be Chicago-only: the user reported the search
-    bar offering addresses from all over the US. `_fetch_nominatim` must pass a
-    Chicago `viewbox` and `bounded=1` so Nominatim restricts results to the
-    metro bounding box instead of the whole country.
+def test_fetch_nominatim_bounds_results_to_service_area() -> None:
+    """Prefilled suggestions must stay inside the service area: the user
+    reported the search bar offering addresses from all over the US.
+    `_fetch_nominatim` must pass a `viewbox` and `bounded=1` so Nominatim
+    restricts results to the service-area bounding box, not the whole country.
+
+    Bounds widened from the Chicago-only box to all of Cook County
+    (2026-07-30). The exact edges are pinned against sources.yaml by
+    `test_geocode_viewbox_matches_target_bbox`; this test only sanity-checks
+    that the values are plausible lat/lons in the right corner of the map.
     """
     from app.routes import geocode
 
@@ -95,10 +103,11 @@ def test_fetch_nominatim_bounds_results_to_chicago() -> None:
     assert params["bounded"] == "1"
     assert "viewbox" in params
     # viewbox is "left,top,right,bottom" — four comma-separated floats covering
-    # the Chicago metro. Sanity-check the longitudes/latitudes are in range.
+    # Cook County. Sanity-check the longitudes/latitudes are in range.
     left, top, right, bottom = (float(x) for x in params["viewbox"].split(","))
-    assert -88.0 < left < -87.5 and -88.0 < right < -87.5
-    assert 41.6 < bottom < 42.1 and 41.6 < top < 42.1
+    assert -88.3 < left < -88.2 and -87.6 < right < -87.5
+    assert 41.4 < bottom < 41.5 and 42.1 < top < 42.2
+    assert left < right and bottom < top
 
 
 def test_geocode_suggest_skips_malformed_nominatim_rows() -> None:
@@ -117,3 +126,30 @@ def test_geocode_suggest_skips_malformed_nominatim_rows() -> None:
         results = resp.get_json()["results"]
         assert len(results) == 1
         assert results[0]["display_name"] == "Good"
+
+
+def test_geocode_viewbox_matches_target_bbox() -> None:
+    """The Nominatim viewbox must cover exactly the prep target bbox.
+
+    geocode.py sends `bounded=1`, so this box hard-limits which addresses a
+    user can even enter, while `target.bbox` in sources.yaml decides which
+    streets exist in the routing graph. If the viewbox is narrower, valid
+    addresses in the service area silently return "no results" — which is
+    what happened to every suburban address when the 2026-07-30 Cook County
+    expansion widened the graph but left this constant on the old Chicago box.
+    If it is wider, users can pick addresses the router has no streets for.
+    """
+    import yaml
+
+    from app.routes.geocode import _SERVICE_AREA_VIEWBOX
+
+    repo_root = Path(__file__).resolve().parents[2]
+    cfg = yaml.safe_load((repo_root / "prep" / "config" / "sources.yaml").read_text())
+    bbox = cfg["target"]["bbox"]
+
+    # Nominatim viewbox order is left,top,right,bottom.
+    left, top, right, bottom = (float(v) for v in _SERVICE_AREA_VIEWBOX.split(","))
+    assert left == pytest.approx(bbox["min_lng"]), "viewbox west edge != target bbox"
+    assert right == pytest.approx(bbox["max_lng"]), "viewbox east edge != target bbox"
+    assert top == pytest.approx(bbox["max_lat"]), "viewbox north edge != target bbox"
+    assert bottom == pytest.approx(bbox["min_lat"]), "viewbox south edge != target bbox"

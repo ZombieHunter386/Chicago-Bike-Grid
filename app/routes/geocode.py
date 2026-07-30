@@ -14,11 +14,18 @@ from flask import Blueprint, jsonify, request
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 MIN_INTERVAL_S = 1.1  # Nominatim TOS
 
-# Chicago metro bounding box, as Nominatim's "viewbox" = left,top,right,bottom
+# Service-area bounding box, as Nominatim's "viewbox" = left,top,right,bottom
 # (min_lng, max_lat, max_lng, min_lat). Combined with bounded=1, Nominatim
-# restricts results to this box so prefilled suggestions stay Chicago-only
+# restricts results to this box so suggestions stay in the service area
 # instead of returning same-named streets from across the US.
-_CHICAGO_VIEWBOX = "-87.9402,42.0230,-87.5240,41.6440"
+#
+# MUST track `target.bbox` in prep/config/sources.yaml — that bbox decides
+# which streets exist in the routing graph, and geocoding outside it yields
+# addresses the router cannot serve. Widened to all of Cook County with the
+# 2026-07-30 expansion; while this still read the old Chicago-only box, every
+# suburban address (Evanston, Oak Park, Schaumburg) failed to geocode.
+# `test_geocode_viewbox_matches_target_bbox` pins the two together.
+_SERVICE_AREA_VIEWBOX = "-88.2636,42.1543,-87.5240,41.4697"
 
 _throttle_lock = threading.Lock()
 _last_request_at = [0.0]
@@ -38,7 +45,7 @@ def _fetch_nominatim(address: str, user_agent: str, limit: int = 1) -> list[dict
             "format": "json",
             "limit": str(limit),
             "countrycodes": "us",
-            "viewbox": _CHICAGO_VIEWBOX,
+            "viewbox": _SERVICE_AREA_VIEWBOX,
             "bounded": "1",
         },
         headers={"User-Agent": user_agent},
