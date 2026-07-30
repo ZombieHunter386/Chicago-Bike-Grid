@@ -40,7 +40,7 @@ from prep.fetchers.pois_cdp import CdpPoisFetcher
 from prep.fetchers.pois_osm import OsmPoisFetcher
 from prep.fetchers.speed_limits import SpeedLimitsFetcher
 from prep.graph.osm_builder import (
-    build_graph_from_bbox,
+    build_graph,
     build_nodes,
     build_street_edges,
     prune_to_routable_network,
@@ -331,7 +331,9 @@ def run_pipeline(
         # roads (alleys) orphans the intersections that only touched them, so we
         # re-take the largest weakly-connected component to drop those dead
         # vertices (otherwise nearest_vertex can snap onto an unroutable node).
-        graph = prune_to_routable_network(build_graph_from_bbox(cfg.target.bbox))
+        graph = prune_to_routable_network(
+            build_graph(cfg.target.bbox, cache_dir=cache_dir)
+        )
         edges = list(build_street_edges(graph))
         nodes = list(build_nodes(graph))
 

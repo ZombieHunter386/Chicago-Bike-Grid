@@ -99,7 +99,7 @@ target:
 
 @patch("prep.main.parse_cdot_facilities")
 @patch("prep.main.parse_cook_lts")
-@patch("prep.main.build_graph_from_bbox")
+@patch("prep.main.build_graph")
 @patch("prep.main.OsmPoisFetcher")
 @patch("prep.main.CdotFacilitiesFetcher")
 @patch("prep.main.CookLtsFetcher")

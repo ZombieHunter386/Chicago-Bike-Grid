@@ -5,6 +5,7 @@ attrs osmid/highway/name/length/geometry) and asserts build_street_edges +
 build_nodes emit consistent topology records the DbBuilder can consume.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 import networkx as nx
@@ -16,6 +17,7 @@ from prep.graph.osm_builder import (
     OsmEdge,
     OsmNode,
     bbox_to_osmnx,
+    build_graph,
     build_graph_from_bbox,
     build_nodes,
     build_street_edges,
@@ -178,3 +180,35 @@ def test_edge_node_ids_consistent_with_nodes(tiny_graph: nx.MultiDiGraph) -> Non
         assert e.tail_node_id in node_ids
     # the fixture graph is connected (single routable component)
     assert nx.is_weakly_connected(tiny_graph)
+
+
+@patch("prep.graph.pbf_extract.build_graph_from_pbf")
+def test_build_graph_defaults_to_geofabrik(mock_pbf, tmp_path: Path, monkeypatch) -> None:
+    """Default source is the cached regional extract, not Overpass.
+
+    Overpass was the default until the Cook County expansion, where osmnx
+    tiles the 3.2x bbox into dozens of requests and the public instance
+    banned us mid-build.
+    """
+    monkeypatch.delenv("GRAPH_SOURCE", raising=False)
+    mock_pbf.return_value = "GRAPH"
+    assert build_graph((41.0, 42.0, -88.0, -87.0), cache_dir=tmp_path) == "GRAPH"
+    assert mock_pbf.call_count == 1
+
+
+@patch("prep.graph.osm_builder.build_graph_from_bbox")
+def test_build_graph_overpass_escape_hatch(mock_bbox, tmp_path: Path, monkeypatch) -> None:
+    """GRAPH_SOURCE=overpass keeps the old path available for small bboxes
+    and for cross-checking the two sources against each other."""
+    monkeypatch.setenv("GRAPH_SOURCE", "overpass")
+    mock_bbox.return_value = "GRAPH"
+    assert build_graph((41.0, 42.0, -88.0, -87.0), cache_dir=tmp_path) == "GRAPH"
+    assert mock_bbox.call_count == 1
+
+
+def test_build_graph_rejects_unknown_source(tmp_path: Path, monkeypatch) -> None:
+    """A typo must fail loudly rather than silently picking a default — the
+    two sources are not interchangeable in cost or ban risk."""
+    monkeypatch.setenv("GRAPH_SOURCE", "overpas")
+    with pytest.raises(ValueError, match="GRAPH_SOURCE"):
+        build_graph((41.0, 42.0, -88.0, -87.0), cache_dir=tmp_path)

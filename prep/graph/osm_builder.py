@@ -16,14 +16,19 @@ Gotchas handled here (plan review F2/F3):
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
 from pyproj import Transformer
 from shapely.geometry import LineString, Point
 from shapely.ops import transform
+
+logger = logging.getLogger(__name__)
 
 # WGS84 -> NAD83(2011) Illinois East (metres); matches prep/db/builder.py.
 _TO_IL_EAST_M = Transformer.from_crs("EPSG:4326", "EPSG:6454", always_xy=True).transform
@@ -82,11 +87,17 @@ def build_graph_from_bbox(
     target_bbox: tuple[float, float, float, float],
     network_type: str = "bike",
 ) -> nx.MultiDiGraph:
-    """Download + simplify the OSM street graph for `target_bbox` via osmnx.
+    """Download + simplify the OSM street graph for `target_bbox` via Overpass.
 
     Returns a simplified MultiDiGraph in EPSG:4326 (osmnx's default output CRS),
     retaining only the largest connected component so the result is routable.
     Network-bound; exercised in the Phase 6 integration build, not unit tests.
+
+    Superseded as the default by the Geofabrik path in
+    ``prep.graph.pbf_extract`` — at county scale osmnx tiles the bbox into
+    dozens of Overpass requests and the public instance banned us mid-build.
+    Kept as an escape hatch (``GRAPH_SOURCE=overpass``) for small bboxes and
+    for cross-checking the two sources against each other.
     """
     import osmnx as ox
 
@@ -101,6 +112,37 @@ def build_graph_from_bbox(
         network_type=network_type,
         simplify=True,
         retain_all=False,
+    )
+
+
+def build_graph(
+    target_bbox: tuple[float, float, float, float],
+    cache_dir: Path,
+    network_type: str = "bike",
+) -> nx.MultiDiGraph:
+    """Build the street graph from the configured source.
+
+    ``GRAPH_SOURCE`` selects: ``geofabrik`` (default — one cached regional
+    extract, clipped locally with osmium) or ``overpass`` (the original
+    tiled download, kept for small bboxes and for comparing sources).
+
+    Both paths end in the same osmnx call shape (``simplify=True``,
+    ``retain_all=False``), so the topology — and therefore the ``road_id``
+    assignment the DB and gap analysis depend on — is equivalent either way.
+    """
+    source = os.environ.get("GRAPH_SOURCE", "geofabrik").strip().lower()
+    if source == "overpass":
+        logger.info("building graph via Overpass (GRAPH_SOURCE=overpass)")
+        return build_graph_from_bbox(target_bbox, network_type=network_type)
+    if source != "geofabrik":
+        raise ValueError(
+            f"GRAPH_SOURCE must be 'geofabrik' or 'overpass' (got {source!r})"
+        )
+    from prep.graph.pbf_extract import build_graph_from_pbf
+
+    logger.info("building graph from Geofabrik extract")
+    return build_graph_from_pbf(
+        target_bbox, cache_dir=cache_dir, network_type=network_type,
     )
 
 
