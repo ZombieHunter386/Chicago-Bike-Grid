@@ -12,6 +12,7 @@ Env vars (read in __main__ block at the bottom):
 """
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 from pathlib import Path
@@ -35,6 +36,9 @@ from app.routes.treatments import build_treatments_blueprint
 # with prep/db/builder.SCHEMA_VERSION and document the back-compat window
 # (spec §3.11: code stays compatible with the last 2 schema versions).
 MIN_SCHEMA_VERSION = 2
+
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_bikemap(db_path: Path, min_streets: int) -> None:
@@ -65,6 +69,61 @@ def _validate_bikemap(db_path: Path, min_streets: int) -> None:
         )
 
 
+def check_geocoder_covers_graph(snap: object) -> str | None:
+    """Warn when the geocoder accepts addresses the routing graph can't serve.
+
+    Three things must agree on the service area: `target.bbox` in
+    sources.yaml (which streets get built), the Nominatim viewbox in
+    routes/geocode.py (which addresses a user can enter), and the *data* —
+    the bikemap.db actually deployed. A test pins the first two together, but
+    nothing can pin the third: the DB is uploaded separately and a deploy can
+    legitimately run new code against an older database for a few minutes.
+
+    That gap is not theoretical. The 2026-07-30 Cook County expansion widened
+    the bbox and viewbox together; had the code shipped before the rebuilt
+    database, a suburban user would have geocoded successfully and only then
+    hit "outside the graph's extent" at routing — strictly worse than today's
+    clean "no results" at the search box.
+
+    Returns a human-readable message when the viewbox reaches materially
+    beyond the loaded graph, else None. Deliberately advisory: a stale-by-
+    minutes DB during a rolling deploy must not take the site down.
+    """
+    import numpy as np
+
+    from app.routes.geocode import _SERVICE_AREA_VIEWBOX
+
+    coords = snap.vertex_coords_wgs84  # type: ignore[attr-defined]
+    if coords is None or len(coords) == 0:
+        return None
+    left, top, right, bottom = (float(v) for v in _SERVICE_AREA_VIEWBOX.split(","))
+    g_min_lat, g_max_lat = float(np.min(coords[:, 0])), float(np.max(coords[:, 0]))
+    g_min_lng, g_max_lng = float(np.min(coords[:, 1])), float(np.max(coords[:, 1]))
+
+    # Degrees of slack before we complain. The graph is clipped to the bbox and
+    # its outermost intersection sits just inside, so a small shortfall is
+    # normal; ~0.05 deg is roughly 5 km, far larger than that edge effect but
+    # far smaller than a city-vs-county mismatch (which is ~0.35 deg here).
+    tolerance = 0.05
+    gaps = []
+    if g_min_lat - bottom > tolerance:
+        gaps.append(f"south (graph {g_min_lat:.4f} vs viewbox {bottom:.4f})")
+    if top - g_max_lat > tolerance:
+        gaps.append(f"north (graph {g_max_lat:.4f} vs viewbox {top:.4f})")
+    if g_min_lng - left > tolerance:
+        gaps.append(f"west (graph {g_min_lng:.4f} vs viewbox {left:.4f})")
+    if right - g_max_lng > tolerance:
+        gaps.append(f"east (graph {g_max_lng:.4f} vs viewbox {right:.4f})")
+    if not gaps:
+        return None
+    return (
+        "geocoder service area extends beyond the routing graph on: "
+        + ", ".join(gaps)
+        + " — addresses there will geocode but fail to route. "
+        "Is bikemap.db older than the deployed config?"
+    )
+
+
 def create_app(
     *,
     bikemap_db: Path,
@@ -88,6 +147,9 @@ def create_app(
 
     init_cache_db(cache_db, fingerprint=bikemap_fingerprint(bikemap_db))
     snap = load_graph(bikemap_db)
+    coverage_warning = check_geocoder_covers_graph(snap)
+    if coverage_warning:
+        logger.warning("%s", coverage_warning)
     pois_by_category = load_pois(bikemap_db)
 
     app = Flask(__name__, static_folder="static", static_url_path="/static")

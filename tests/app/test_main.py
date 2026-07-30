@@ -1,5 +1,6 @@
 """Tests for the Flask app factory."""
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def test_create_app_returns_flask_app_with_blueprints(
@@ -220,3 +221,53 @@ def test_explore_route_serves_explorer_shell(
     assert resp.status_code == 200
     assert b"<title>Chicago LTS Data Explorer</title>" in resp.data
     assert b'src="/static/explore.js"' in resp.data
+
+
+def test_coverage_check_silent_when_graph_matches_viewbox() -> None:
+    """A graph spanning the viewbox must not warn.
+
+    Guards against a noisy check: the graph is clipped to the bbox, so its
+    outermost intersection always sits slightly inside the viewbox edge.
+    """
+    import numpy as np
+
+    from app.main import check_geocoder_covers_graph
+    from app.routes.geocode import _SERVICE_AREA_VIEWBOX
+
+    left, top, right, bottom = (float(v) for v in _SERVICE_AREA_VIEWBOX.split(","))
+    # Corners just inside every edge — the realistic best case.
+    coords = np.array([[bottom + 0.01, left + 0.01], [top - 0.01, right - 0.01]])
+    snap = SimpleNamespace(vertex_coords_wgs84=coords)
+
+    assert check_geocoder_covers_graph(snap) is None
+
+
+def test_coverage_check_flags_city_data_under_county_viewbox() -> None:
+    """The exact regression this exists to catch: county config, city data.
+
+    If the widened viewbox ships before the rebuilt bikemap.db, suburban
+    users geocode fine and then fail at routing — worse than the clean "no
+    results" they get when the viewbox is narrow.
+    """
+    import numpy as np
+
+    from app.main import check_geocoder_covers_graph
+
+    # Old Chicago-only graph extent, against the current county viewbox.
+    coords = np.array([[41.6440, -87.9402], [42.0230, -87.5240]])
+    snap = SimpleNamespace(vertex_coords_wgs84=coords)
+
+    msg = check_geocoder_covers_graph(snap)
+    assert msg is not None
+    # Chicago's graph falls short on the south and west edges of Cook County.
+    assert "south" in msg and "west" in msg
+    assert "bikemap.db" in msg
+
+
+def test_coverage_check_handles_empty_graph() -> None:
+    import numpy as np
+
+    from app.main import check_geocoder_covers_graph
+
+    snap = SimpleNamespace(vertex_coords_wgs84=np.empty((0, 2)))
+    assert check_geocoder_covers_graph(snap) is None
