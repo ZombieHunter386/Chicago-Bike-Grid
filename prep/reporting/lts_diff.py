@@ -14,7 +14,7 @@ class LtsDiff:
 
     def to_markdown(self) -> str:
         lines = [
-            "# Stress-Tier Regression Diff (Mellow + CDOT)",
+            "# LTS Regression Diff (Cook County LTS 2023)",
             "",
             f"- Total segments in current run: **{self.total_segments}**",
             f"- Tier changed (vs previous): **{len(self.changed)}**",

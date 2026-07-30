@@ -16,12 +16,12 @@ def routes_app(tiny_bikemap_db: Path):
     return app
 
 
-def test_routes_returns_fast_and_safe_for_any_tier(routes_app) -> None:
+def test_routes_returns_fast_and_safe_for_death_wish_tier(routes_app) -> None:
     client = routes_app.test_client()
     resp = client.post("/routes", json={
         "home": {"lat": 41.940, "lon": -87.680},  # near v100
         "dest": {"lat": 41.940, "lon": -87.670},  # near v400
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 200
     data = resp.get_json()
@@ -62,7 +62,7 @@ def test_routes_400_when_home_far_outside_graph_extent(routes_app) -> None:
     resp = client.post("/routes", json={
         "home": {"lat": 43.0, "lon": -89.0},   # Madison, WI
         "dest": {"lat": 41.94, "lon": -87.67},
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 400
     assert "outside" in resp.get_json()["error"].lower() or \
@@ -84,7 +84,7 @@ def test_routes_payload_surfaces_dangerous_intersections(routes_app) -> None:
     resp = client.post("/routes", json={
         "home": {"lat": 41.940, "lon": -87.680},  # near v100
         "dest": {"lat": 41.940, "lon": -87.670},  # near v400 (path crosses v300)
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 200
     fast = resp.get_json()["fast"]
@@ -107,7 +107,7 @@ def test_routes_danger_excludes_calm_crossing_of_high_approach_node(routes_app) 
     resp = client.post("/routes", json={
         "home": {"lat": 41.945, "lon": -87.675},  # near v200
         "dest": {"lat": 41.935, "lon": -87.675},  # near v500 (path crosses v300)
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 200
     fast = resp.get_json()["fast"]
@@ -128,7 +128,7 @@ def test_routes_payload_carries_polyline_lts_matching_segment_count(routes_app) 
     resp = client.post("/routes", json={
         "home": {"lat": 41.940, "lon": -87.680},
         "dest": {"lat": 41.940, "lon": -87.670},
-        "tier": "any",
+        "tier": "death_wish",
     })
     assert resp.status_code == 200
     data = resp.get_json()
@@ -142,6 +142,39 @@ def test_routes_payload_carries_polyline_lts_matching_segment_count(routes_app) 
             f"{kind}: polyline_lts has {len(polyline_lts)} entries but "
             f"polyline has {len(polyline)} vertices (expected {len(polyline) - 1})"
         )
-        # Every LTS value must be 1, 2, or 3 (the only legal LTS levels).
+        # Every LTS value must be 1..4 (the legal levels on the Cook County
+        # 4-level scale). NB a DB built before the 2026-07-29 migration only
+        # contains 1..3, which is a valid subset — this must not be tightened
+        # back to (1, 2, 3) on that evidence.
         for v in polyline_lts:
-            assert v in (1, 2, 3), f"{kind}: unexpected LTS value {v}"
+            assert v in (1, 2, 3, 4), f"{kind}: unexpected LTS value {v}"
+
+
+@pytest.fixture
+def lts4_routes_app(lts4_bikemap_db: Path):
+    from flask import Flask
+
+    from app.core.graph import load_graph
+    from app.routes.routing import build_routes_blueprint
+
+    app = Flask(__name__)
+    app.register_blueprint(build_routes_blueprint(load_graph(lts4_bikemap_db)))
+    return app
+
+
+def test_routes_payload_carries_lts4(lts4_routes_app) -> None:
+    """An LTS-4 street must survive the whole API path, not just the DB.
+
+    The frontend colors segments off polyline_lts, so a 4 that never reaches the
+    payload would render as the unknown-value grey rather than red.
+    """
+    client = lts4_routes_app.test_client()
+    resp = client.post("/routes", json={
+        "home": {"lat": 41.940, "lon": -87.680},  # near v100
+        "dest": {"lat": 41.940, "lon": -87.670},  # near v300, across the LTS-4 street
+        "tier": "death_wish",
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert 4 in data["safe"]["polyline_lts"]
+    assert data["safe"]["lts_distribution"] == {"1": 1, "4": 1}

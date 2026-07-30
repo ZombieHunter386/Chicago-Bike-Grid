@@ -1,14 +1,15 @@
-"""Routing weight tables — single source for spec §0.1.
+"""Routing weight tables — single source for spec (2026-07-29 LTS-4) §4.
 
 Tier names map to user-facing labels in the UI:
-    "kid"    → "Safe for kid"     (LTS 1 only)
-    "parent" → "Safe for parent"  (LTS 1-2)
-    "any"    → "Not safe"         (LTS 1-3)
+    "kid"           → "Safe for kid"  (LTS 1 only)
+    "inexperienced" → "Inexperienced" (LTS 1-2)
+    "experienced"   → "Experienced"   (LTS 1-3)
+    "death_wish"    → "Death wish"    (LTS 1-4)
 
 Main weights enforce hard tier cutoffs (∞ for disallowed LTS levels);
-fallback weights from §0.1 are applied when the main-weight route returns
-no path. Both tables read from this file so values cannot drift between
-code and spec.
+fallback weights are applied when the main-weight route returns no path.
+Both tables read from this file so values cannot drift between code and
+prep/config/routing_weights.yaml (the canonical spec copy).
 
 INF_WEIGHT detection: routing.py checks whether ANY edge in a Dijkstra
 result has weight ≥ INF_WEIGHT (rather than thresholding total cost),
@@ -23,25 +24,38 @@ from __future__ import annotations
 # threshold (which can misfire on long routes).
 INF_WEIGHT = 1e9
 
+# A crossing is surfaced as dangerous when the worst cross-street the route must
+# cross is at least this stressful. Deliberately 3, not 4, on the 4-level scale:
+# both LTS 3 and LTS 4 are high-stress to cross, and the old 3-tier threshold
+# (where 3 was the top) covered the same OSM road classes the 4-level table now
+# splits across 3 and 4 — so keeping 3 preserves the calibration rather than
+# silently narrowing which intersections get a marker.
+DANGER_CROSS_LTS = 3
+
+# Index i = LTS (i+1). Four entries per table: LTS 1..4.
 TIERS: dict[str, dict[str, list[float]]] = {
     "kid": {
-        "main":     [1.0, INF_WEIGHT, INF_WEIGHT],
-        "fallback": [1.0, 5.0, 20.0],
+        "main":     [1.0, INF_WEIGHT, INF_WEIGHT, INF_WEIGHT],
+        "fallback": [1.0, 5.0, 20.0, 40.0],
     },
-    "parent": {
-        "main":     [1.0, 1.2, INF_WEIGHT],
-        "fallback": [1.0, 1.2, 10.0],
+    "inexperienced": {
+        "main":     [1.0, 1.2, INF_WEIGHT, INF_WEIGHT],
+        "fallback": [1.0, 1.2, 10.0, 20.0],
     },
-    "any": {
-        "main":     [1.0, 1.2, 1.5],
-        "fallback": [1.0, 1.2, 1.5],
+    "experienced": {
+        "main":     [1.0, 1.2, 1.5, INF_WEIGHT],
+        "fallback": [1.0, 1.2, 1.5, 10.0],
+    },
+    "death_wish": {
+        "main":     [1.0, 1.2, 1.5, 2.0],
+        "fallback": [1.0, 1.2, 1.5, 2.0],
     },
 }
 
 
 def _validate_lts(lts: int) -> None:
-    if lts not in (1, 2, 3):
-        raise ValueError(f"lts must be 1, 2, or 3 (got {lts})")
+    if lts not in (1, 2, 3, 4):
+        raise ValueError(f"lts must be 1..4 (got {lts})")
 
 
 def main_weight_for(tier: str, lts: int) -> float:

@@ -63,6 +63,34 @@ def test_route_returns_304_on_matching_etag(
     assert second.status_code == 304
 
 
+def test_route_revalidates_rather_than_hard_caching(
+    tiny_bikemap_db_with_pois: Path, tmp_path: Path,
+) -> None:
+    """The export is replaced wholesale on every prep refresh, so a client must
+    never reuse it without asking. A long max-age would strand returning
+    visitors on the pre-refresh network (3-tier colors under a 4-level legend
+    after the LTS migration); `no-cache` forces an ETag revalidation, which
+    304s cheaply when nothing changed.
+    """
+    import shutil
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    db_target = data_dir / "bikemap.db"
+    shutil.copy(tiny_bikemap_db_with_pois, db_target)
+
+    app = _make_app_with_lts_file(db_target, tmp_path / "cache.db", data_dir)
+    resp = app.test_client().get("/lts-network")
+
+    assert resp.status_code == 200
+    cache_control = resp.headers["Cache-Control"]
+    assert "no-cache" in cache_control
+    # Guard the specific regression: any nonzero max-age lets a browser serve
+    # a stale export without revalidating.
+    assert "max-age=0" in cache_control or "max-age" not in cache_control
+    # Revalidation is only cheap if the validator is still there.
+    assert resp.headers.get("ETag")
+
+
 def test_route_returns_404_when_file_missing(
     tiny_bikemap_db_with_pois: Path, tmp_path: Path,
 ) -> None:

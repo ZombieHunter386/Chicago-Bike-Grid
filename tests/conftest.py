@@ -10,7 +10,7 @@ loader, basic routing). Has an LTS-3 chokepoint at v300 to exercise the
 max rule.
 
 ``divergent_bikemap_db`` — 4-node graph specifically designed to force
-fast/safe divergence at 'parent' tier for gap-analysis tests. The fast
+fast/safe divergence at 'inexperienced' tier for gap-analysis tests. The fast
 route uses a direct LTS-3 segment; the safe route detours via two
 LTS-1 segments.
 
@@ -122,8 +122,38 @@ def tiny_bikemap_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def lts4_bikemap_db(tmp_path: Path) -> Path:
+    """3-node line containing an LTS-4 street, for full-scale coverage.
+
+        v100 ──[r1: lts=1, 150m]── v200 ──[r2: lts=4, 150m]── v300
+
+    Exists because every other fixture tops out at LTS 3, which left the
+    LTS-4 half of the 4-level scale (added 2026-07-29) untested end to end:
+    DB write -> load_graph int8 arrays -> weight-table index 3 -> routing ->
+    polyline_lts -> API payload. A latent 1..3 assumption anywhere on that path
+    is invisible without a fixture that actually carries a 4.
+    """
+    db_path = tmp_path / "bikemap.db"
+    builder = DbBuilder(db_path)
+    builder.create_schema()
+    builder.insert_intersections([
+        _intersection(100, 41.940, -87.680, 1),
+        _intersection(200, 41.940, -87.675, 1),
+        _intersection(300, 41.940, -87.670, 4),
+    ])
+    builder.insert_streets([
+        _seg(1, 1001, 100, 200, 1, [(-87.680, 41.940), (-87.675, 41.940)]),
+        _seg(2, 1002, 200, 300, 4, [(-87.675, 41.940), (-87.670, 41.940)],
+             highway="primary"),
+    ])
+    builder.record_schema_meta(code_version="test")
+    builder.close()
+    return db_path
+
+
+@pytest.fixture
 def divergent_bikemap_db(tmp_path: Path) -> Path:
-    """4-node graph where fast and safe routes diverge at 'parent' tier.
+    """4-node graph where fast and safe routes diverge at 'inexperienced' tier.
 
          v100 ────[r1: lts=1, len 150m]────── v200
           │                                    │

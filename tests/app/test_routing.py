@@ -39,14 +39,14 @@ def test_safe_route_kid_tier_avoids_lts3(tiny_bikemap_db: Path) -> None:
     assert r.is_fallback is True
 
 
-def test_safe_route_any_tier_uses_shortest_lts3_allowed(tiny_bikemap_db: Path) -> None:
-    """At 'any' tier (LTS 1-3 allowed with 1.5× penalty), v100 → v500 should
-    use the direct LTS-3 edge (road 5) since the detour through v300 also hits LTS 3."""
+def test_safe_route_death_wish_tier_uses_shortest_lts3_allowed(tiny_bikemap_db: Path) -> None:
+    """At 'death_wish' tier (LTS 1-4 allowed, LTS-3 = 1.5× penalty), v100 → v500
+    should use the direct LTS-3 edge (road 5) since the detour through v300 also hits LTS 3."""
     snap = load_graph(tiny_bikemap_db)
     v100 = vertex_for_int_id(snap, 100)
     v500 = vertex_for_int_id(snap, 500)
     assert v100 is not None and v500 is not None
-    r = compute_safe_route(snap, v100, v500, "any")
+    r = compute_safe_route(snap, v100, v500, "death_wish")
     assert r is not None
     assert r.is_fallback is False
     # Direct path = 2 vertices (v100, v500); detour via v300 = 3 vertices.
@@ -58,7 +58,7 @@ def test_safe_route_records_lts_distribution(tiny_bikemap_db: Path) -> None:
     v100 = vertex_for_int_id(snap, 100)
     v400 = vertex_for_int_id(snap, 400)
     assert v100 is not None and v400 is not None
-    r = compute_safe_route(snap, v100, v400, "any")
+    r = compute_safe_route(snap, v100, v400, "death_wish")
     assert r is not None
     assert sum(r.lts_distribution.values()) == len(r.edge_path)
 
@@ -147,9 +147,9 @@ def test_route_carries_per_edge_lts(divergent_bikemap_db: Path) -> None:
     assert len(fast.edge_lts) == len(fast.edge_path)
     assert fast.edge_lts == [3]
 
-    # Safe route at parent tier uses r1 + r2 (LTS-1 detour); edge_lts == [1, 1].
+    # Safe route at inexperienced tier uses r1 + r2 (LTS-1 detour); edge_lts == [1, 1].
     # (Intersection lts_approach is 1 throughout this fixture, so eff == seg_lts.)
-    safe = compute_safe_route(snap, v10, v40, "parent")
+    safe = compute_safe_route(snap, v10, v40, "inexperienced")
     assert safe is not None
     assert len(safe.edge_lts) == len(safe.edge_path)
     assert safe.edge_lts == [1, 1]
@@ -178,7 +178,7 @@ def test_compute_routes_return_trivial_route_when_src_equals_dst(
     assert fast.length_m == 0.0
     assert fast.edge_path == []
     assert fast.vertex_path == [v100]
-    safe = compute_safe_route(snap, v100, v100, "any")
+    safe = compute_safe_route(snap, v100, v100, "death_wish")
     assert safe is not None
     assert safe.length_m == 0.0
     assert safe.is_fallback is False
@@ -225,3 +225,37 @@ def test_route_returns_none_for_unreachable_endpoints() -> None:
         assert v1 is not None and v3 is not None
         assert compute_fast_route(snap, v1, v3) is None
         assert compute_safe_route(snap, v1, v3, "kid") is None
+
+
+# --- LTS 4 end-to-end coverage (4-level scale, 2026-07-29) ---
+
+
+def test_death_wish_routes_over_lts4_without_fallback(lts4_bikemap_db: Path) -> None:
+    """LTS 4 is in-tier for death_wish, so its main weights must yield a path.
+
+    This is the only test that drives weight-table index 3; a length-3 table
+    (the pre-migration shape) would IndexError here rather than pass quietly.
+    """
+    snap = load_graph(lts4_bikemap_db)
+    src = vertex_for_int_id(snap, 100)
+    dst = vertex_for_int_id(snap, 300)
+
+    route = compute_safe_route(snap, src, dst, "death_wish")
+
+    assert route is not None
+    assert route.is_fallback is False
+    assert route.lts_distribution == {1: 1, 4: 1}
+    assert 4 in route.edge_lts
+
+
+def test_experienced_tier_cannot_stay_on_tier_across_lts4(lts4_bikemap_db: Path) -> None:
+    """LTS 4 is out of tier for experienced (1-3), so the only path is a fallback."""
+    snap = load_graph(lts4_bikemap_db)
+    src = vertex_for_int_id(snap, 100)
+    dst = vertex_for_int_id(snap, 300)
+
+    route = compute_safe_route(snap, src, dst, "experienced")
+
+    assert route is not None
+    assert route.is_fallback is True, "crossing LTS 4 must be reported as a fallback"
+    assert 4 in route.edge_lts

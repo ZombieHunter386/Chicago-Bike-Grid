@@ -1,10 +1,15 @@
 # prep/fetchers/cdot_facilities.py
-"""Fetch + parse the CDOT bike-facility ArcGIS layers (Phase 2b).
+"""Fetch + parse the CDOT bike-facility ArcGIS layers.
+
+These supply the **improve-only override** on top of the Cook County LTS
+baseline (design 2026-07-29 §3.3): CDOT's Jan-2025 layer knows about
+facilities built after the county's 2023 OSM snapshot, so it can lower a
+street's LTS but never raise it.
 
 Two FeatureServer layers, mirroring the prep/fetchers/hin.py ArcGIS pattern:
   - on-street `Bikeway_Network_2024_Final_Public` — facility type in `BIKE_DSPLY`
-    (PROTECTED/NEIGHBORHOOD/BUFFERED/BIKE/SHARED). Drives the CDOT override.
-  - off-street `Trails_Network_2024_11_18` — the whole layer maps to tier 1, so
+    (PROTECTED/NEIGHBORHOOD/BUFFERED/BIKE/SHARED).
+  - off-street `Trails_Network_2024_11_18` — the whole layer maps to LTS 1, so
     its attributes are not consulted; parsed facilities carry off_street=True.
 """
 

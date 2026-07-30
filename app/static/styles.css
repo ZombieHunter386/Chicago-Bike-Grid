@@ -30,11 +30,26 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 }
 #basemap-toggle:hover { background: #f8fafc; }
 
+/* Centered via auto margins against a full-width box rather than
+   `left: 50%; translateX(-50%)`. With left:50% and no explicit width, an
+   absolutely positioned element's shrink-to-fit width is capped at
+   (containing block - 50%) = half the viewport, so the fourth tier button
+   (added with the 4-level LTS scale) wrapped to two rows on any display
+   narrower than ~1350px and collided with #home-form below 800px. */
 #tier-selector {
-  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 4px;
+  position: absolute; top: 12px; left: 0; right: 0;
+  width: fit-content; max-width: calc(100% - 24px); margin-inline: auto;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 4px;
   background: var(--c-bg); border-radius: var(--radius-panel); box-shadow: var(--shadow-panel);
   padding: 4px;
+}
+/* Only reachable in a narrow *desktop* window: the `width=1024` viewport meta
+   pins mobile's layout viewport to 1024px, where all four fit on one row.
+   Below ~700px the labels plus their "(LTS n-n)" hints can't share a row, so
+   drop the hints — the route legend still carries the LTS mapping. */
+@media (max-width: 700px) {
+  #tier-selector .lts-allowance { display: none; }
+  #tier-selector button { padding: 8px 10px; }
 }
 #tier-selector button {
   background: transparent; border: none; padding: 8px 14px; cursor: pointer;
@@ -43,8 +58,9 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
 #tier-selector button:hover { background: #f1f5f9; }
 #tier-selector button.active { color: white; }
 #tier-selector button[data-tier="kid"].active { background: #15803d; }
-#tier-selector button[data-tier="parent"].active { background: #16a34a; }
-#tier-selector button[data-tier="any"].active { background: #6b7280; }
+#tier-selector button[data-tier="inexperienced"].active { background: #16a34a; }
+#tier-selector button[data-tier="experienced"].active { background: #a16207; }
+#tier-selector button[data-tier="death_wish"].active { background: #6b7280; }
 .lts-allowance { font-size: 12px; opacity: 0.75; margin-left: 4px; }
 
 /* Route color legend. Sits bottom-right above the maplibre attribution.
@@ -65,8 +81,9 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   width: 18px; height: 4px; border-radius: 2px;
 }
 .rl-swatch.rl-lts-1 { background: #16a34a; }
-.rl-swatch.rl-lts-2 { background: #f59e0b; }
-.rl-swatch.rl-lts-3 { background: #dc2626; }
+.rl-swatch.rl-lts-2 { background: #eab308; }
+.rl-swatch.rl-lts-3 { background: #f59e0b; }
+.rl-swatch.rl-lts-4 { background: #dc2626; }
 
 /* Horizontal divider between the LTS-color rows (top) and the line-style
    rows (bottom). Keeps the two semantic axes legible. */
@@ -574,8 +591,9 @@ html, body { height: 100%; font-family: var(--font-stack); color: var(--c-text);
   width: 18px; height: 4px; border-radius: 2px; display: inline-block;
 }
 .swatch-lts-1 { background: #16a34a; }
-.swatch-lts-2 { background: #f59e0b; }
-.swatch-lts-3 { background: #dc2626; }
+.swatch-lts-2 { background: #eab308; }
+.swatch-lts-3 { background: #f59e0b; }
+.swatch-lts-4 { background: #dc2626; }
 .swatch-hin {
   /* Matches the explore.js hin-layer paint (color + opacity). Wider +
      translucent so a HIN street visually layers on top of its underlying

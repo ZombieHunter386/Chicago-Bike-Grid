@@ -235,9 +235,10 @@ function ensureRouteLayer(map, destId, kind, route, home, dest) {
     // Same hex values used by /explore (LTS_COLOR_EXPR in explore.js)
     // and by the legend swatches below the tier selector.
     "match", ["get", "lts"],
-    1, "#16a34a",   // green — LTS 1 (safe for kid)
-    2, "#f59e0b",   // orange — LTS 2 (safe for parent)
-    3, "#dc2626",   // red — LTS 3 (not safe)
+    1, "#16a34a",   // green — LTS 1 (calm)
+    2, "#eab308",   // yellow — LTS 2 (moderate)
+    3, "#f59e0b",   // orange — LTS 3 (stressful)
+    4, "#dc2626",   // red — LTS 4 (hostile)
     "#999999",      // fallback for unknown LTS values
   ];
   const paint = (kind === "fast")

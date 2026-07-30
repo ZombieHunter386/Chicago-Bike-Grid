@@ -57,10 +57,11 @@ _marginal_pool = ThreadPoolExecutor(max_workers=_MARGINAL_POOL_WORKERS)
 
 # tier_max_lts = highest LTS the user *prefers* — corridor enumeration finds
 # fast-route segments/intersections with lts > tier_max_lts.
-# 'any' is set to 2 (not 3) so LTS-3 segments still surface as corridor
-# members; previously 3 made the filter `lts > 3` always-false, returning
-# zero candidates regardless of input and silently breaking §6.4 #5.
-_TIER_MAX_LTS = {"kid": 1, "parent": 2, "any": 2}
+# The top tier ('death_wish', allows LTS 1-4) is capped at 3 (not 4) so LTS-4
+# segments still surface as corridor members; a value of 4 would make the
+# filter `lts > 4` always-false, returning zero candidates regardless of input
+# and silently breaking §6.4 #5. Non-top tiers use their actual preference max.
+_TIER_MAX_LTS = {"kid": 1, "inexperienced": 2, "experienced": 3, "death_wish": 3}
 
 _TO_IL_EAST_M = Transformer.from_crs("EPSG:4326", "EPSG:6454", always_xy=True).transform
 

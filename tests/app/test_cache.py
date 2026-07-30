@@ -15,7 +15,7 @@ def test_cache_key_deterministic() -> None:
     k2 = cache_key((41.9, -87.7), (41.88, -87.62), "kid")
     assert k1 == k2
     # Different tier → different key.
-    k3 = cache_key((41.9, -87.7), (41.88, -87.62), "any")
+    k3 = cache_key((41.9, -87.7), (41.88, -87.62), "death_wish")
     assert k1 != k3
 
 

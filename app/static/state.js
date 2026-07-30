@@ -3,14 +3,26 @@
 // State shape:
 //   { home: {lat, lon, displayName, approximate} | null,
 //     destinations: [{id, lat, lon, name, address, category, icon, approximate}],
-//     tier: "kid" | "parent" | "any",
+//     tier: "kid" | "inexperienced" | "experienced" | "death_wish",
 //     drilledPair: {destId, kind: "fast"|"safe"} | null }
 //
 // Permalink: JSON.stringify -> LZString.compressToEncodedURIComponent ->
 // location.hash. Reverse to parse. The compact JSON uses short keys + array
 // form so 5 destinations stay under spec §2.3's 250-char target.
 
-const DEFAULT_STATE = { home: null, destinations: [], tier: "any", drilledPair: null };
+const DEFAULT_TIER = "death_wish";
+const VALID_TIERS = new Set(["kid", "inexperienced", "experienced", "death_wish"]);
+// Permalinks minted before the 4-level LTS migration (2026-07-29) carry the
+// old 3-persona keys. Map them forward so shared URLs keep working: "parent"
+// (LTS 1-2) and "any" (all levels) are the direct equivalents.
+const LEGACY_TIERS = { parent: "inexperienced", any: "death_wish" };
+
+function normalizeTier(t) {
+  if (VALID_TIERS.has(t)) return t;
+  return LEGACY_TIERS[t] || DEFAULT_TIER;
+}
+
+const DEFAULT_STATE = { home: null, destinations: [], tier: DEFAULT_TIER, drilledPair: null };
 
 let state = structuredClone(DEFAULT_STATE);
 const subscribers = [];
@@ -63,7 +75,7 @@ export function decodeHashToState(hash) {
       id: d[0], lat: d[1], lon: d[2], name: d[3], address: d[4],
       category: d[5], icon: d[6], approximate: !!d[7],
     })),
-    tier: compact.t || "any",
+    tier: normalizeTier(compact.t),
     drilledPair: compact.p ? { destId: compact.p[0], kind: compact.p[1] } : null,
   };
 }

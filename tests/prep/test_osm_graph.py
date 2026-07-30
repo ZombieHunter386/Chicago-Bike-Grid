@@ -106,7 +106,7 @@ def test_build_street_edges_collapses_osmid_list(tiny_graph: nx.MultiDiGraph) ->
     by_pair = {frozenset((e.head_node_id, e.tail_node_id)): e for e in build_street_edges(tiny_graph)}
     e = by_pair[frozenset((2, 3))]
     assert e.osm_id == 200  # first element, schema needs a single int
-    assert e.osm_way_ids == ("200", "201")  # full list for the Mellow way-id join
+    assert e.osm_way_ids == ("200", "201")  # full list for the county LTS join
     # geometry came from the edge's curved LineString (3 vertices), not node coords
     assert len(wkt_loads(e.geometry_wkt).coords) == 3
     # no `length` attr on this edge -> length_m computed from geometry
@@ -151,7 +151,7 @@ def test_prune_to_routable_network_drops_orphans_and_islands() -> None:
 
 def test_build_street_edges_drops_service_roads(tiny_graph: nx.MultiDiGraph) -> None:
     """Service roads (alleys, driveways, parking aisles) are excluded from the
-    network. Mellow ignores them entirely and they aren't useful bike routes;
+    network. They aren't useful bike routes;
     left in, they dominated the map as tier-3 clutter (~half of all streets)."""
     tiny_graph.add_node(5, x=-87.69, y=41.94)
     tiny_graph.add_edge(1, 5, osmid=500, highway="service", name="Alley", length=100.0)

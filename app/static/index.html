@@ -15,17 +15,19 @@
     <button id="basemap-toggle" type="button">Satellite</button>
     <div id="tier-selector">
       <button data-tier="kid" type="button">Safe for kid <span class="lts-allowance">(LTS 1)</span></button>
-      <button data-tier="parent" type="button">Safe for parent <span class="lts-allowance">(LTS 1-2)</span></button>
-      <button data-tier="any" type="button" class="active">Not safe <span class="lts-allowance">(LTS 1-3)</span></button>
+      <button data-tier="inexperienced" type="button">Inexperienced <span class="lts-allowance">(LTS 1-2)</span></button>
+      <button data-tier="experienced" type="button">Experienced <span class="lts-allowance">(LTS 1-3)</span></button>
+      <button data-tier="death_wish" type="button" class="active">Death wish <span class="lts-allowance">(LTS 1-4)</span></button>
     </div>
     <!-- Route color legend. Each polyline segment is colored by its raw
          LTS level (same scheme as /explore). Both safe and fast routes
          use the same colors; they're distinguished by line style — solid
          for safe, dashed for fastest. -->
     <div id="route-legend">
-      <span class="rl-item"><span class="rl-swatch rl-lts-1"></span>LTS 1 · Safe for kid</span>
-      <span class="rl-item"><span class="rl-swatch rl-lts-2"></span>LTS 2 · Safe for parent</span>
-      <span class="rl-item"><span class="rl-swatch rl-lts-3"></span>LTS 3 · Not safe</span>
+      <span class="rl-item"><span class="rl-swatch rl-lts-1"></span>LTS 1 · Calm</span>
+      <span class="rl-item"><span class="rl-swatch rl-lts-2"></span>LTS 2 · Moderate</span>
+      <span class="rl-item"><span class="rl-swatch rl-lts-3"></span>LTS 3 · Stressful</span>
+      <span class="rl-item"><span class="rl-swatch rl-lts-4"></span>LTS 4 · Hostile</span>
       <span class="rl-sep"></span>
       <span class="rl-item"><span class="rl-swatch rl-style-solid"></span>Safe route</span>
       <span class="rl-item"><span class="rl-swatch rl-style-dashed"></span>Fastest route</span>

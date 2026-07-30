@@ -1,21 +1,102 @@
-"""Spatial classify: OSM edges x Mellow (way-id join) x CDOT (spatial) (Phase 4).
+"""classify_network: OSM edges x Cook County LTS (way-ID join) -> SegmentRecords.
 
-classify_network attaches a tier to each OSM edge and returns SegmentRecords:
-  - Mellow kind from the way-id join (edge.osm_way_ids ∩ mellow ways), best tier
-  - CDOT override from a buffer + bearing spatial match (off-street bearing-optional)
-  - the Mellow-path floor (a path stays tier 1)
+The county layer is OSM-derived, so the join is a plain way_id dict lookup.
+Edges whose way ids are absent from the snapshot fall back to the road-class
+baseline; classify_network reports the matched/fallback split as ClassifyStats.
 """
 
-from shapely.geometry import LineString, MultiLineString, mapping
+from shapely.geometry import LineString, mapping
 
 from prep.fetchers.cdot_facilities import CdotFacility
-from prep.fetchers.mellow import MellowFeature
 from prep.graph.osm_builder import OsmEdge
-from prep.lts.ingest import SegmentRecord
-from prep.scoring.classify_network import classify_network
+from prep.scoring.classify_network import ClassifyStats, classify_network
 
 
 def _edge(
+    road_id: int,
+    way_ids: tuple[str, ...],
+    highway: str,
+    *,
+    osm_id: int | None = None,
+) -> OsmEdge:
+    """Build an OsmEdge; `osm_id` defaults to the first way id (pass it explicitly
+    when `way_ids` is empty)."""
+    return OsmEdge(
+        road_id=road_id,
+        osm_id=int(way_ids[0]) if osm_id is None else osm_id,
+        osm_way_ids=way_ids,
+        head_node_id=road_id * 10,
+        tail_node_id=road_id * 10 + 1,
+        name=f"Street {road_id}",
+        highway=highway,
+        length_m=100.0,
+        geometry_wkt="LINESTRING(-87.7 41.9, -87.69 41.9)",
+    )
+
+
+def test_classify_network_joins_by_way_id_and_tracks_match_rate() -> None:
+    edges = [
+        _edge(1, ("100",), "residential"),        # matched -> LTS 2
+        _edge(2, ("200", "300"), "residential"),  # multi-way, worst -> LTS 4
+        _edge(3, ("999",), "secondary"),          # unmatched -> road class 3
+    ]
+    way_lts = {"100": 2, "200": 1, "300": 4}
+
+    records, stats = classify_network(edges, way_lts)
+
+    assert [r.lts for r in records] == [2, 4, 3]
+    assert stats == ClassifyStats(matched=2, fallback=1)
+
+
+def test_classify_stats_match_rate_percent() -> None:
+    assert ClassifyStats(matched=3, fallback=1).match_rate_pct == 75.0
+    # Empty network reads as 0%, not a vacuous 100% — see the property's comment.
+    assert ClassifyStats(matched=0, fallback=0).match_rate_pct == 0.0
+
+
+def test_classify_stats_total() -> None:
+    assert ClassifyStats(matched=3, fallback=1).total == 4
+    assert ClassifyStats(matched=0, fallback=0).total == 0
+
+
+def test_classify_network_on_empty_network() -> None:
+    assert classify_network([], {}) == ([], ClassifyStats(matched=0, fallback=0))
+
+
+def test_classify_network_preserves_edge_fields() -> None:
+    edges = [_edge(7, ("100",), "residential")]
+    records, _ = classify_network(edges, {"100": 1})
+    r = records[0]
+    assert r.road_id == 7
+    assert r.osm_id == 100
+    assert r.head_int_id == 70
+    assert r.tail_int_id == 71
+    assert r.name == "Street 7"
+    assert r.highway == "residential"
+    assert r.geometry_wkt == "LINESTRING(-87.7 41.9, -87.69 41.9)"
+    # These stay null here by contract — later passes fill them in
+    # (intersection_tiers sets ft_int_str/tf_int_str; speed is unused).
+    assert r.speed is None
+    assert r.ft_int_str is None
+    assert r.tf_int_str is None
+
+
+def test_edge_with_no_way_ids_falls_back_to_road_class() -> None:
+    """An edge carrying no OSM way ids can't join at all — road class, not a crash."""
+    records, stats = classify_network([_edge(5, (), "residential", osm_id=0)], {"100": 4})
+    assert records[0].lts == 1
+    assert stats == ClassifyStats(matched=0, fallback=1)
+
+
+# --- CDOT improve-only override, spatially matched (design §3.3) ---
+#
+# Geometry conventions mirror tests/prep/test_hin_to_osm.py: east-west edges
+# spaced ~111m apart in latitude so their match buffers never overlap a
+# neighbour, and facilities drawn parallel (matching bearing) or perpendicular
+# (bearing rejected) as each case requires.
+
+
+def _geo_edge(
     road_id: int,
     way_ids: tuple[str, ...],
     coords: list[tuple[float, float]],
@@ -24,7 +105,7 @@ def _edge(
     line = LineString(coords)
     return OsmEdge(
         road_id=road_id,
-        osm_id=int(way_ids[0]),
+        osm_id=int(way_ids[0]) if way_ids else 0,
         osm_way_ids=way_ids,
         head_node_id=road_id * 10,
         tail_node_id=road_id * 10 + 1,
@@ -35,7 +116,12 @@ def _edge(
     )
 
 
-def _cdot(facility_type: str | None, coords: list[tuple[float, float]], *, off_street: bool = False) -> CdotFacility:
+def _cdot(
+    facility_type: str | None,
+    coords: list[tuple[float, float]],
+    *,
+    off_street: bool = False,
+) -> CdotFacility:
     return CdotFacility(
         facility_type=facility_type,
         geometry=mapping(LineString(coords)),
@@ -43,90 +129,70 @@ def _cdot(facility_type: str | None, coords: list[tuple[float, float]], *, off_s
     )
 
 
-# East-west edges spaced ~111m apart in latitude so buffers never overlap neighbors.
-EDGES = [
-    _edge(1, ("100",), [(-87.6800, 41.9400), (-87.6750, 41.9400)]),  # mellow street, no CDOT -> 1 (calm green)
-    _edge(2, ("999",), [(-87.6800, 41.9460), (-87.6750, 41.9460)], "primary"),  # neither; arterial road class -> 3
-    _edge(3, ("888",), [(-87.6800, 41.9410), (-87.6750, 41.9410)]),  # CDOT PROTECTED -> 1
-    _edge(4, ("200",), [(-87.6800, 41.9420), (-87.6750, 41.9420)]),  # mellow street + CDOT SHARED -> 3
-    _edge(5, ("900",), [(-87.6800, 41.9430), (-87.6750, 41.9430)]),  # mellow PATH + CDOT SHARED -> 1 (floor)
-    _edge(6, ("777",), [(-87.6800, 41.9440), (-87.6750, 41.9440)]),  # off-street trail (perp) -> 1
-    _edge(7, ("666",), [(-87.6800, 41.9450), (-87.6750, 41.9450)], "secondary"),  # BUFFERED perp -> no match; arterial -> 3
-]
-
-MELLOW = [
-    MellowFeature(kind="path", way_ids=frozenset({"900"}), slug="p", name="Path"),
-    MellowFeature(kind="street", way_ids=frozenset({"100", "200"}), slug="s", name="Street"),
-    MellowFeature(kind="route", way_ids=frozenset({"300"}), slug="r", name="Route"),
-]
-
-CDOT = [
-    # parallel, ~2m north of their target edges (within the 10m buffer, same bearing)
-    _cdot("PROTECTED", [(-87.6800, 41.94102), (-87.6750, 41.94102)]),  # over edge 3
-    _cdot("SHARED", [(-87.6800, 41.94202), (-87.6750, 41.94202)]),  # over edge 4
-    _cdot("SHARED", [(-87.6800, 41.94302), (-87.6750, 41.94302)]),  # over edge 5 (path)
-    # off-street trail crossing edge 6 perpendicularly (N-S) — bearing-optional must still match
-    _cdot(None, [(-87.6775, 41.9438), (-87.6775, 41.9442)], off_street=True),
-    # on-street BUFFERED crossing edge 7 perpendicularly — bearing filter must REJECT it
-    _cdot("BUFFERED", [(-87.6770, 41.9448), (-87.6770, 41.9452)]),
-]
-
-
-def _tiers() -> dict[int, int]:
-    records = classify_network(EDGES, MELLOW, CDOT)
-    assert all(isinstance(r, SegmentRecord) for r in records)
-    return {r.road_id: r.lts for r in records}
-
-
-def test_classify_network_tiers() -> None:
-    tiers = _tiers()
-    assert tiers == {1: 1, 2: 3, 3: 1, 4: 3, 5: 1, 6: 1, 7: 3}
-
-
-def test_classify_network_path_floor_end_to_end() -> None:
-    # edge 5 is a Mellow path overlapped by a CDOT SHARED (tier-3) facility;
-    # the path floor keeps it tier 1.
-    assert _tiers()[5] == 1
-
-
-def test_classify_network_road_class_baseline() -> None:
-    """An edge in neither Mellow nor CDOT is classified by its OSM road class:
-    a quiet residential street is tier 1 (not the old tier-3 default), while an
-    arterial is tier 3."""
+def test_cdot_override_lowers_lts_but_never_raises_it() -> None:
     edges = [
-        _edge(1, ("1",), [(-87.68, 41.95), (-87.675, 41.95)], "residential"),
-        _edge(2, ("2",), [(-87.68, 41.96), (-87.675, 41.96)], "secondary"),
-        _edge(3, ("3",), [(-87.68, 41.97), (-87.675, 41.97)], "tertiary"),
+        # LTS 4 arterial that CDOT now shows as protected -> improved to 1.
+        _geo_edge(1, ("100",), [(-87.680, 41.9400), (-87.675, 41.9400)], "primary"),
+        # LTS 1 quiet street CDOT marks as a sharrow -> untouched at 1.
+        _geo_edge(2, ("200",), [(-87.680, 41.9410), (-87.675, 41.9410)]),
+        # LTS 4 arterial with a painted lane -> improved only to 2.
+        _geo_edge(3, ("300",), [(-87.680, 41.9420), (-87.675, 41.9420)], "primary"),
+        # LTS 1 street with a painted lane -> stays 1 (override would worsen).
+        _geo_edge(4, ("400",), [(-87.680, 41.9430), (-87.675, 41.9430)]),
     ]
-    tiers = {r.road_id: r.lts for r in classify_network(edges, [], [])}
-    assert tiers == {1: 1, 2: 3, 3: 2}
+    way_lts = {"100": 4, "200": 1, "300": 4, "400": 1}
+    facilities = [
+        _cdot("PROTECTED", [(-87.680, 41.9400), (-87.675, 41.9400)]),
+        _cdot("SHARED", [(-87.680, 41.9410), (-87.675, 41.9410)]),
+        _cdot("BIKE", [(-87.680, 41.9420), (-87.675, 41.9420)]),
+        _cdot("BUFFERED", [(-87.680, 41.9430), (-87.675, 41.9430)]),
+    ]
+
+    records, stats = classify_network(edges, way_lts, facilities)
+
+    assert [r.lts for r in records] == [1, 1, 2, 1]
+    # Only edges 1 and 3 were actually improved.
+    assert stats.cdot_improved == 2
+    assert stats.matched == 4
 
 
-def test_classify_network_handles_multilinestring_facility() -> None:
-    """CDOT facilities can be MultiLineString; the bearing match must not crash.
-
-    Regression (Phase 6 integration build): `_bearing()` called `list(geom.coords)`,
-    which raises "Sub-geometries may have coordinate sequences, but multi-part
-    geometries do not" on multi-part geometries. An on-street MultiLineString
-    facility laid over an edge (same bearing) must still classify it tier 1.
-    """
-    edge = _edge(1, ("100",), [(-87.6800, 41.9400), (-87.6750, 41.9400)])
-    multi = MultiLineString(
-        [
-            [(-87.6800, 41.94002), (-87.6775, 41.94002)],
-            [(-87.6775, 41.94002), (-87.6750, 41.94002)],
-        ]
+def test_off_street_trail_improves_to_lts1_without_bearing_agreement() -> None:
+    """Trails cross streets, so they match regardless of bearing."""
+    edge = _geo_edge(1, ("100",), [(-87.680, 41.940), (-87.675, 41.940)], "primary")
+    perpendicular_trail = _cdot(
+        None, [(-87.6775, 41.9385), (-87.6775, 41.9415)], off_street=True
     )
-    fac = CdotFacility(facility_type="PROTECTED", geometry=mapping(multi), off_street=False)
-    tiers = {r.road_id: r.lts for r in classify_network([edge], [], [fac])}
-    assert tiers[1] == 1
+    records, stats = classify_network([edge], {"100": 4}, [perpendicular_trail])
+    assert records[0].lts == 1
+    assert stats.cdot_improved == 1
 
 
-def test_classify_network_emits_segment_records() -> None:
-    records = {r.road_id: r for r in classify_network(EDGES, MELLOW, CDOT)}
-    r = records[1]
-    assert r.osm_id == 100
-    assert r.head_int_id == 10 and r.tail_int_id == 11
-    assert r.ft_int_str is None and r.tf_int_str is None
-    assert r.geometry_wkt.startswith("LINESTRING")
-    assert r.lts in (1, 2, 3)
+def test_on_street_facility_on_a_cross_street_does_not_bleed_over() -> None:
+    """A perpendicular on-street lane fails the ±30° bearing check."""
+    edge = _geo_edge(1, ("100",), [(-87.680, 41.940), (-87.675, 41.940)], "primary")
+    perpendicular_lane = _cdot("PROTECTED", [(-87.6775, 41.9385), (-87.6775, 41.9415)])
+    records, stats = classify_network([edge], {"100": 4}, [perpendicular_lane])
+    assert records[0].lts == 4
+    assert stats.cdot_improved == 0
+
+
+def test_best_facility_wins_when_several_cover_one_edge() -> None:
+    coords = [(-87.680, 41.940), (-87.675, 41.940)]
+    edge = _geo_edge(1, ("100",), coords, "primary")
+    facilities = [_cdot("BIKE", coords), _cdot("PROTECTED", coords)]
+    records, _ = classify_network([edge], {"100": 4}, facilities)
+    assert records[0].lts == 1
+
+
+def test_cdot_override_applies_to_road_class_fallback_edges_too() -> None:
+    """A way absent from the 2023 county snapshot can still be improved."""
+    coords = [(-87.680, 41.940), (-87.675, 41.940)]
+    edge = _geo_edge(1, ("999",), coords, "primary")  # unmatched -> road class 4
+    records, stats = classify_network([edge], {}, [_cdot("PROTECTED", coords)])
+    assert records[0].lts == 1
+    assert stats == ClassifyStats(matched=0, fallback=1, cdot_improved=1)
+
+
+def test_no_facilities_argument_is_equivalent_to_empty_list() -> None:
+    edges = [_geo_edge(1, ("100",), [(-87.680, 41.940), (-87.675, 41.940)])]
+    assert classify_network(edges, {"100": 2}) == classify_network(edges, {"100": 2}, [])

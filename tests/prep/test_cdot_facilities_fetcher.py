@@ -18,7 +18,7 @@ from prep.fetchers.cdot_facilities import (
     CdotFacility,
     parse_cdot_facilities,
 )
-from prep.scoring.classifier import classify_tier
+from prep.scoring.classifier import cdot_lts_for_facility
 
 ON_URL = "https://example.com/services/Bikeway_Network/FeatureServer/0"
 OFF_URL = "https://example.com/services/Trails/FeatureServer/0"
@@ -88,9 +88,14 @@ def test_parse_cdot_facilities(cache_dir: Path, fixtures_dir: Path) -> None:
     assert len(on_street) == 3
     assert len(off_street) == 2
 
-    # on-street facility types resolve through the classifier
-    tiers = sorted(classify_tier(None, f.facility_type) for f in on_street)
-    assert tiers == [1, 2, 3]  # PROTECTED->1, BUFFERED->2, SHARED->3
+    # on-street facility types resolve through the classifier. The fixture holds
+    # PROTECTED -> 1, BUFFERED -> 2 and SHARED -> None (a sharrow earns no
+    # override under improve-only semantics; see design §3.3).
+    overrides = sorted(
+        (cdot_lts_for_facility(f.facility_type) for f in on_street),
+        key=lambda v: (v is None, v),
+    )
+    assert overrides == [1, 2, None]
 
     # off-street facilities carry no facility_type but still have geometry
     assert all(f.facility_type is None and f.geometry for f in off_street)

@@ -31,7 +31,7 @@ const original = {
     { id: "d1", lat: 41.94, lon: -87.67, name: "Audubon", address: "3500 N Hoyne", category: "school", icon: "school", approximate: false },
     { id: "d2", lat: 41.95, lon: -87.68, name: "Lincoln Park", address: null, category: "park", icon: "park", approximate: false },
   ],
-  tier: "parent",
+  tier: "inexperienced",
   drilledPair: { destId: "d1", kind: "safe" },
 };
 
@@ -43,9 +43,26 @@ assertEq(decoded, original, "round-trip");
 const empty = decodeHashToState("");
 assertEq(
   empty,
-  { home: null, destinations: [], tier: "any", drilledPair: null },
+  { home: null, destinations: [], tier: "death_wish", drilledPair: null },
   "empty hash defaults",
 );
+
+// 2b. Permalinks minted before the 4-level LTS migration carry the old
+// 3-persona tier keys; they must map forward rather than silently reset.
+for (const [legacy, expected] of [
+  ["parent", "inexperienced"],
+  ["any", "death_wish"],
+  ["bogus", "death_wish"],
+]) {
+  const legacyHash = LZString.compressToEncodedURIComponent(
+    JSON.stringify({ h: null, d: [], t: legacy, p: null }),
+  );
+  assertEq(
+    decodeHashToState(legacyHash).tier,
+    expected,
+    `legacy tier "${legacy}" maps to "${expected}"`,
+  );
+}
 
 // 3. Compressed payload for 5+ destinations stays compact (spec §2.3
 // targets <250 chars; allow some slack since lz-string output varies).

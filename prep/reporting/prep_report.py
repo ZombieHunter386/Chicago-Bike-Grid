@@ -4,6 +4,8 @@ import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 
+from prep.scoring.classify_network import ClassifyStats
+
 
 @dataclass(frozen=True)
 class SourceRunSummary:
@@ -22,7 +24,15 @@ def build_prep_report(
     lts_diff_path: Path | None = None,
     hin_match_report_path: Path | None = None,
     lts_network_size_bytes: int | None = None,
+    lts_stats: ClassifyStats | None = None,
 ) -> str:
+    """Render the per-run prep report as Markdown.
+
+    ``lts_stats`` is the :class:`~prep.scoring.classify_network.ClassifyStats`
+    returned by :func:`prep.scoring.classify_network.classify_network`; when
+    given, the report grows an "LTS way-ID match rate" section so 2023-snapshot
+    way-ID drift is visible every run. Omit it to omit the section.
+    """
     duration_s = (run_finished_at - run_started_at).total_seconds()
     lines = [
         "# Prep Report",
@@ -45,6 +55,30 @@ def build_prep_report(
         warns = f"{len(s.warnings)} warning(s)" if s.warnings else "—"
         lines.append(f"| `{s.name}` | **{s.status}** | {s.record_count} | {delta} | {warns} |")
     lines.append("")
+
+    if lts_stats is not None:
+        # Empty network reads as 0% matched / 0% fallback, not a vacuous 100%:
+        # same deliberate convention as ClassifyStats.match_rate_pct (no edges
+        # means the OSM fetch or the county join broke). NB HinMatchReport
+        # .segment_match_pct in this same package deliberately takes the
+        # OPPOSITE convention (nothing to match is a complete outcome there),
+        # so the two are inconsistent on purpose — see its docstring.
+        total = lts_stats.total
+        matched_pct = lts_stats.match_rate_pct
+        fallback_pct = (100.0 * lts_stats.fallback / total) if total else 0.0
+        lines += [
+            "## LTS way-ID match rate",
+            "",
+            f"- Edges matched to a Cook County way_id: {lts_stats.matched:,} "
+            f"({matched_pct:.1f}%)",
+            f"- Edges on the road-class fallback: {lts_stats.fallback:,} "
+            f"({fallback_pct:.1f}%)",
+            f"- Edges improved by a CDOT facility: {lts_stats.cdot_improved:,}",
+            "",
+            "Expect ≥ 95%. A materially lower rate means 2023-snapshot way-ID "
+            "drift and the road-class fallback is carrying too much of the network.",
+            "",
+        ]
 
     has_warnings = any(s.warnings for s in sources)
     if has_warnings:

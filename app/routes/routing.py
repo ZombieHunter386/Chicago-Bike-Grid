@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 
 from app.core.graph import GraphSnapshot, nearest_vertex
 from app.core.routing import Route, compute_fast_route, compute_safe_route
-from app.core.weights import TIERS
+from app.core.weights import DANGER_CROSS_LTS, TIERS
 
 # Reject inputs whose nearest vertex is more than this far away (likely
 # outside Cook County). 5 km is generous — a legitimate Chicago address
@@ -33,8 +33,9 @@ def _route_to_payload(snap: GraphSnapshot, r: Route | None) -> dict | None:
     # street's own stress (per spec §2.2).
     #
     # danger_intersections lists only the crossings where the route must cross
-    # an UNSAFE (LTS-3) street it does NOT itself ride — i.e. dangerous cross
-    # traffic (vertex_cross_lts >= 3). The frontend drops a marker AT the node.
+    # a HIGH-STRESS (LTS 3 or 4) street it does NOT itself ride — i.e. dangerous
+    # cross traffic (vertex_cross_lts >= DANGER_CROSS_LTS). The frontend drops a
+    # marker AT the node.
     # A node is NOT flagged merely because its approach tier is high or because
     # the route's own segment there is stressful: the route's own stress is shown
     # by coloring the line, so a calm pass-through of a busy intersection stays
@@ -44,7 +45,7 @@ def _route_to_payload(snap: GraphSnapshot, r: Route | None) -> dict | None:
          "lon": float(snap.vertex_coords_wgs84[v][1]),
          "lts": int(lts)}
         for v, lts in zip(r.vertex_path, r.vertex_cross_lts, strict=True)
-        if lts >= 3
+        if lts >= DANGER_CROSS_LTS
     ]
     return {
         "polyline": polyline,
