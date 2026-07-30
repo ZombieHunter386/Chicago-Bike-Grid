@@ -1,6 +1,8 @@
 """Tests for the graph-snapshot loader (app.core.graph)."""
 from pathlib import Path
 
+import numpy as np
+
 from app.core.graph import (
     GraphSnapshot,
     edges_for_road_id,
@@ -8,6 +10,7 @@ from app.core.graph import (
     nearest_vertex,
     vertex_for_int_id,
 )
+from app.core.weights import TIERS
 from prep.db.builder import DbBuilder
 from prep.lts.ingest import IntersectionRecord, SegmentRecord
 
@@ -169,3 +172,45 @@ def test_nearest_vertex_distance_increases_with_offset(tiny_bikemap_db: Path) ->
     # ~100m offset NE of v100.
     _, dist = nearest_vertex(snap, 41.9402, -87.6798)
     assert 5.0 < dist < 200.0  # between 5m and 200m sanity range
+
+
+def test_fallback_weights_correct_for_every_tier(lts4_bikemap_db: Path) -> None:
+    """Fallback weights must equal length x fallback_table[effective_lts].
+
+    load_graph aliases a tier's fallback array to its main array when the two
+    weight tables are identical (true for `death_wish`, which allows every LTS
+    so has nothing out-of-tier to penalize) — that saves a byte-identical copy
+    of a per-edge float64 array. This recomputes every tier independently so
+    the shortcut can't silently serve wrong weights if a fallback table is
+    ever changed to differ from its main table.
+    """
+    snap = load_graph(lts4_bikemap_db)
+    eff_idx = np.maximum(
+        snap.edge_seg_lts.astype(np.int64), snap.edge_head_lts.astype(np.int64)
+    ) - 1
+    for tier, tables in TIERS.items():
+        expected = snap.edge_length_m * np.asarray(tables["fallback"], dtype=np.float64)[eff_idx]
+        assert np.array_equal(snap.fallback_weights_by_tier[tier], expected), tier
+        # Aliasing is only legitimate where the tables genuinely match.
+        if snap.fallback_weights_by_tier[tier] is snap.base_weights_by_tier[tier]:
+            assert tables["main"] == tables["fallback"], (
+                f"{tier} aliases main->fallback but its tables differ"
+            )
+
+
+def test_road_string_columns_are_interned(lts4_bikemap_db: Path) -> None:
+    """Repeated `highway`/`name` values must share one object per distinct string.
+
+    sqlite returns a fresh str per row, so without interning a 350k-road graph
+    held ~350k separate objects for ~15 distinct highway values and a few
+    thousand street names — 40 MB of pure duplication.
+    """
+    snap = load_graph(lts4_bikemap_db)
+    for values in (snap.road_highway_list, snap.road_name_list):
+        present = [v for v in values if v is not None]
+        if len(present) < 2:
+            continue
+        by_value: dict[str, int] = {}
+        for v in present:
+            first = by_value.setdefault(v, id(v))
+            assert id(v) == first, f"duplicate object for repeated value {v!r}"
